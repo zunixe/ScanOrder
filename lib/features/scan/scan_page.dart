@@ -302,6 +302,18 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        // Photo save toggle
+                        Consumer<ScanProvider>(
+                          builder: (_, provider, __) => IconButton(
+                            onPressed: () => provider.setSavePhoto(!provider.savePhoto),
+                            icon: Icon(
+                              provider.savePhoto ? Icons.photo_camera : Icons.photo_camera_outlined,
+                              color: provider.savePhoto ? Colors.white : Colors.white70,
+                            ),
+                            tooltip: provider.savePhoto ? 'Foto: ON' : 'Foto: OFF',
+                          ),
+                        ),
+                        const SizedBox(width: 4),
                         IconButton(
                           onPressed: () {
                             setState(() => _isTorchOn = !_isTorchOn);

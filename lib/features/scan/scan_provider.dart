@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
@@ -30,11 +32,21 @@ class ScanProvider extends ChangeNotifier {
   int todayCount = 0;
   int totalCount = 0;
   bool _processing = false;
+  bool _savePhoto = true;
+
+  bool get savePhoto => _savePhoto;
 
   Future<void> loadCounts() async {
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     todayCount = await _db.getOrderCountByDate(today);
     totalCount = await _db.getTotalOrderCount();
+    _savePhoto = await _quota.getSavePhoto();
+    notifyListeners();
+  }
+
+  Future<void> setSavePhoto(bool value) async {
+    _savePhoto = value;
+    await _quota.setSavePhoto(value);
     notifyListeners();
   }
 
@@ -75,6 +87,23 @@ class ScanProvider extends ChangeNotifier {
         return lastResult;
       }
 
+      // Check if photo should be saved
+      final effectivePhotoPath = _savePhoto ? photoPath : null;
+      if (_savePhoto && photoPath != null) {
+        // Check storage limit before saving photo
+        final remaining = await _quota.getRemainingBytes();
+        if (remaining >= 0) {
+          try {
+            final file = File(photoPath);
+            final size = file.lengthSync();
+            if (size > remaining) {
+              debugPrint('[ScanProvider] Storage full, skipping photo');
+              photoPath = null;
+            }
+          } catch (_) {}
+        }
+      }
+
       // Insert new
       final now = DateTime.now();
       final order = ScannedOrder(
@@ -82,13 +111,13 @@ class ScanProvider extends ChangeNotifier {
         marketplace: marketplace,
         scannedAt: now,
         date: DateFormat('yyyy-MM-dd').format(now),
-        photoPath: photoPath,
+        photoPath: effectivePhotoPath,
       );
 
       await _db.insertOrder(order);
 
       // Sync ke Supabase backend (async, tidak blocking)
-      SupabaseService().insertOrder(order);
+      _syncToSupabase(order);
 
       todayCount++;
       totalCount++;
@@ -111,5 +140,36 @@ class ScanProvider extends ChangeNotifier {
   void clearResult() {
     lastResult = null;
     notifyListeners();
+  }
+
+  /// Ambil device ID dan kirim ke Supabase (async, tidak blocking)
+  void _syncToSupabase(ScannedOrder order) async {
+    try {
+      final supabase = SupabaseService();
+      final user = supabase.currentUser;
+      if (user == null) return;
+
+      final deviceInfo = DeviceInfoPlugin();
+      String deviceId = 'unknown';
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        deviceId = androidInfo.id;
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        deviceId = iosInfo.identifierForVendor ?? 'unknown';
+      }
+
+      // Try to get team_id
+      final team = await supabase.getMyTeam();
+      final teamId = team?.id;
+
+      if (teamId != null) {
+        await supabase.insertOrderWithTeam(order, deviceId: deviceId, teamId: teamId);
+      } else {
+        await supabase.insertOrder(order, deviceId: deviceId);
+      }
+    } catch (_) {
+      // Silently fail, Supabase sync is best-effort
+    }
   }
 }

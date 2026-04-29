@@ -9,6 +9,7 @@ import 'features/stats/stats_page.dart';
 import 'features/stats/stats_provider.dart';
 import 'features/subscription/subscription_page.dart';
 import 'features/subscription/subscription_provider.dart';
+import 'features/auth/auth_provider.dart';
 
 class ScanOrderApp extends StatelessWidget {
   const ScanOrderApp({super.key});
@@ -21,6 +22,7 @@ class ScanOrderApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => HistoryProvider()),
         ChangeNotifierProvider(create: (_) => StatsProvider()),
         ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
       child: MaterialApp(
         title: 'ScanOrder',

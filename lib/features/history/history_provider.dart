@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
 
 class HistoryProvider extends ChangeNotifier {
@@ -40,7 +41,17 @@ class HistoryProvider extends ChangeNotifier {
   }
 
   Future<void> deleteOrder(int id) async {
+    // Ambil order untuk dapat resi sebelum delete
+    final all = await _db.getAllOrders();
+    final order = all.firstWhere((o) => o.id == id, orElse: () => ScannedOrder(
+      resi: '', marketplace: '', scannedAt: DateTime.now(), date: ''
+    ));
+    // Delete dari local DB
     await _db.deleteOrder(id);
+    // Sync delete ke Supabase
+    if (order.resi.isNotEmpty) {
+      SupabaseService().deleteOrderByResi(order.resi);
+    }
     await loadOrders();
     await loadDates();
   }

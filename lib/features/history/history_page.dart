@@ -9,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
 import '../../models/order.dart';
 import 'history_provider.dart';
+import '../auth/auth_provider.dart';
+import '../auth/login_dialog.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -89,6 +91,29 @@ class _HistoryPageState extends State<HistoryPage> {
       body: Consumer<HistoryProvider>(
         builder: (_, provider, _) => Column(
           children: [
+            // Cloud backup prompt (guest only)
+            Consumer<AuthProvider>(
+              builder: (_, auth, __) {
+                if (auth.isLoggedIn) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Card(
+                    color: Colors.orange.withAlpha(30),
+                    child: ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.cloud_upload_outlined, color: Colors.orange),
+                      title: const Text('Data tersimpan lokal', style: TextStyle(fontSize: 13)),
+                      subtitle: const Text('Login untuk backup & sync ke cloud', style: TextStyle(fontSize: 12)),
+                      trailing: TextButton(
+                        onPressed: () => showLoginDialog(context),
+                        child: const Text('Login'),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+
             // Search bar
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
