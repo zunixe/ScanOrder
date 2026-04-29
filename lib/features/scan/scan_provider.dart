@@ -46,6 +46,9 @@ class ScanProvider extends ChangeNotifier {
       final resi = rawCode.trim();
       if (resi.isEmpty) return null;
 
+      // Filter: hanya terima nomor resi, tolak Order ID dll
+      if (!MarketplaceDetector.isValidResi(resi)) return null;
+
       final marketplace = MarketplaceDetector.detect(resi);
 
       // Check duplicate

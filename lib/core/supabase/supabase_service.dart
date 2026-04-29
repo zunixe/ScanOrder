@@ -15,8 +15,8 @@ class SupabaseService {
   SupabaseService._internal();
 
   // GANTI INI dengan URL dan key dari Supabase project Anda:
-  static const String _supabaseUrl = 'https://YOUR_PROJECT.supabase.co';
-  static const String _supabaseKey = 'YOUR_ANON_KEY';
+  static const String _supabaseUrl = 'https://rnithriviguzbfpvzrwa.supabase.co';
+  static const String _supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJuaXRocml2aWd1emJmcHZ6cndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQwNDksImV4cCI6MjA5MzA0MDA0OX0.3dMU23uT_9uEGHirs0PieViE7k1M_ezlCJ8wjryf2lc';
 
   bool get _isConfigured =>
       !_supabaseUrl.contains('YOUR_PROJECT') && !_supabaseKey.contains('YOUR_ANON_KEY');
