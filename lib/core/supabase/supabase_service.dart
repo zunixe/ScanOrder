@@ -281,6 +281,7 @@ class SupabaseService {
       debugPrint('[Supabase] Client not initialized');
       return;
     }
+    final user = currentUser;
     try {
       debugPrint('[Supabase] Inserting order: ${order.resi}');
       final data = {
@@ -290,6 +291,7 @@ class SupabaseService {
         'scanned_at': order.scannedAt.millisecondsSinceEpoch,
         'date': order.date,
         'photo_url': order.photoPath,
+        'user_id': user?.id,
       };
       if (teamId != null) data['team_id'] = teamId;
       await client.from('orders').insert(data);
