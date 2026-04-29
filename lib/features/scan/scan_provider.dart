@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
 import '../../services/marketplace_detector.dart';
 import '../../services/quota_service.dart';
@@ -37,7 +38,7 @@ class ScanProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ScanResult?> processScan(String rawCode) async {
+  Future<ScanResult?> processScan(String rawCode, String? photoPath) async {
     if (_processing) return null;
     _processing = true;
 
@@ -78,9 +79,14 @@ class ScanProvider extends ChangeNotifier {
         marketplace: marketplace,
         scannedAt: now,
         date: DateFormat('yyyy-MM-dd').format(now),
+        photoPath: photoPath,
       );
 
       await _db.insertOrder(order);
+
+      // Sync ke Supabase backend (async, tidak blocking)
+      SupabaseService().insertOrder(order);
+
       todayCount++;
       totalCount++;
 

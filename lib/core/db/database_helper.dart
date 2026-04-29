@@ -20,8 +20,9 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -32,11 +33,18 @@ class DatabaseHelper {
         resi TEXT NOT NULL UNIQUE,
         marketplace TEXT NOT NULL,
         scanned_at INTEGER NOT NULL,
-        date TEXT NOT NULL
+        date TEXT NOT NULL,
+        photo_path TEXT
       )
     ''');
     await db.execute('CREATE INDEX idx_date ON orders(date)');
     await db.execute('CREATE INDEX idx_marketplace ON orders(marketplace)');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE orders ADD COLUMN photo_path TEXT');
+    }
   }
 
   Future<int> insertOrder(ScannedOrder order) async {

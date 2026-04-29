@@ -4,6 +4,7 @@ class ScannedOrder {
   final String marketplace;
   final DateTime scannedAt;
   final String date; // YYYY-MM-DD
+  final String? photoPath; // Path to captured photo
 
   ScannedOrder({
     this.id,
@@ -11,6 +12,7 @@ class ScannedOrder {
     required this.marketplace,
     required this.scannedAt,
     required this.date,
+    this.photoPath,
   });
 
   Map<String, dynamic> toMap() {
@@ -20,6 +22,7 @@ class ScannedOrder {
       'marketplace': marketplace,
       'scanned_at': scannedAt.millisecondsSinceEpoch,
       'date': date,
+      'photo_path': photoPath,
     };
   }
 
@@ -30,6 +33,7 @@ class ScannedOrder {
       marketplace: map['marketplace'] as String,
       scannedAt: DateTime.fromMillisecondsSinceEpoch(map['scanned_at'] as int),
       date: map['date'] as String,
+      photoPath: map['photo_path'] as String?,
     );
   }
 }

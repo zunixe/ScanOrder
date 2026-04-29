@@ -229,6 +229,7 @@ class _OrderTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = AppTheme.getMarketplaceColor(order.marketplace);
     final time = DateFormat('HH:mm').format(order.scannedAt);
+    final hasPhoto = order.photoPath != null;
 
     return Dismissible(
       key: ValueKey(order.id),
@@ -301,13 +302,59 @@ class _OrderTile extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
-          trailing: Text(
-            time,
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasPhoto)
+                Icon(
+                  Icons.image,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              const SizedBox(width: 4),
+              Text(
+                time,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
+          onTap: () {
+            if (hasPhoto) {
+              _showPhotoDialog(context, order.photoPath!);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showPhotoDialog(BuildContext context, String photoPath) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppBar(
+              title: const Text('Foto Scan'),
+              automaticallyImplyLeading: false,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            Expanded(
+              child: Image.file(
+                File(photoPath),
+                fit: BoxFit.contain,
+              ),
+            ),
+          ],
         ),
       ),
     );

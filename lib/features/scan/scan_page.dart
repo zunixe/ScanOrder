@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
 import 'scan_provider.dart';
 
@@ -27,6 +29,7 @@ class _ScanPageState extends State<ScanPage> {
     _controller = MobileScannerController(
       detectionSpeed: DetectionSpeed.normal,
       facing: CameraFacing.back,
+      returnImage: true,
     );
     context.read<ScanProvider>().loadCounts();
   }
@@ -53,12 +56,30 @@ class _ScanPageState extends State<ScanPage> {
       _onCooldown = false;
     });
 
-    _handleScan(code);
+    _handleScan(code, capture);
   }
 
-  Future<void> _handleScan(String code) async {
+  Future<void> _handleScan(String code, BarcodeCapture capture) async {
     final provider = context.read<ScanProvider>();
-    final result = await provider.processScan(code);
+    
+    // Capture photo from the BarcodeCapture (mobile_scanner returnImage: true)
+    String? photoPath;
+    try {
+      if (capture.image != null && capture.image!.isNotEmpty) {
+        final directory = await getApplicationDocumentsDirectory();
+        final path = '${directory.path}/scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final file = File(path);
+        await file.writeAsBytes(capture.image!);
+        photoPath = path;
+        debugPrint('Photo saved to: $photoPath');
+      } else {
+        debugPrint('capture.image is null or empty');
+      }
+    } catch (e) {
+      debugPrint('Failed to capture photo: $e');
+    }
+    
+    final result = await provider.processScan(code, photoPath);
     if (result == null) return;
 
     switch (result.status) {

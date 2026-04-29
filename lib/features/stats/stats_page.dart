@@ -56,6 +56,56 @@ class _StatsPageState extends State<StatsPage> {
 
               const SizedBox(height: 24),
 
+              // Storage usage card
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.storage,
+                            color: AppTheme.primaryColor,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Penyimpanan',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _StorageRow(
+                        label: 'Database',
+                        value: provider.formattedDbSize,
+                        icon: Icons.dataset_outlined,
+                      ),
+                      const Divider(height: 16),
+                      _StorageRow(
+                        label: 'Foto (${provider.photoCount})',
+                        value: provider.formattedPhotoSize,
+                        icon: Icons.photo_library_outlined,
+                      ),
+                      const Divider(height: 16),
+                      _StorageRow(
+                        label: 'Total',
+                        value: provider.formattedTotalSize,
+                        icon: Icons.folder_outlined,
+                        isBold: true,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
               // Period selector + bar chart
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -332,6 +382,49 @@ class _MarketplacePieChart extends StatelessWidget {
         centerSpaceRadius: 30,
         sectionsSpace: 2,
       ),
+    );
+  }
+}
+
+class _StorageRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final bool isBold;
+
+  const _StorageRow({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.isBold = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.grey),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+            color: isBold
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -44,19 +44,19 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
-  final _pages = const [
-    ScanPage(),
-    HistoryPage(),
-    StatsPage(),
-    SubscriptionPage(),
+  final _pages = [
+    const ScanPage(key: PageStorageKey('scan')),
+    const HistoryPage(key: PageStorageKey('history')),
+    const StatsPage(key: PageStorageKey('stats')),
+    const SubscriptionPage(key: PageStorageKey('subscription')),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: _pages[_currentIndex],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
