@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
+import '../../features/auth/auth_provider.dart';
 import 'scan_provider.dart';
 
 class ScanPage extends StatefulWidget {
@@ -79,7 +80,8 @@ class _ScanPageState extends State<ScanPage> {
       debugPrint('Failed to capture photo: $e');
     }
     
-    final result = await provider.processScan(code, photoPath);
+    final teamId = context.read<AuthProvider>().currentTeam?.id;
+    final result = await provider.processScan(code, photoPath, teamId: teamId);
     if (result == null) return;
 
     switch (result.status) {
@@ -198,7 +200,7 @@ class _ScanPageState extends State<ScanPage> {
       builder: (ctx) => AlertDialog(
         title: const Text('Kuota Habis'),
         content: const Text(
-          'Kuota gratis 50 order sudah habis.\nUpgrade ke Pro untuk scan tanpa batas!',
+          'Kuota scan periode ini sudah habis atau paket sudah tidak aktif.\nPerpanjang / upgrade paket untuk lanjut scan.',
         ),
         actions: [
           TextButton(

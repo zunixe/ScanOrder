@@ -107,6 +107,25 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> leaveTeam() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final ok = await _supabase.leaveTeam();
+      if (ok) {
+        _currentTeam = null;
+      } else {
+        _error = 'Gagal keluar dari tim';
+      }
+    } catch (e) {
+      _error = 'Error: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> signUp(String email, String password) async {
     if (_supabase.isOffline) {
       _error = 'Tidak ada koneksi ke server. Pastikan internet aktif atau server Supabase tersedia.';

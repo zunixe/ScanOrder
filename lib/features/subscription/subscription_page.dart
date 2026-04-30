@@ -16,13 +16,22 @@ class SubscriptionPage extends StatefulWidget {
 
 class _SubscriptionPageState extends State<SubscriptionPage> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  late final AuthProvider _authProvider;
+
+  String _fmtDate(DateTime dt) {
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final y = dt.year.toString();
+    return '$d/$m/$y';
+  }
 
   @override
   void initState() {
     super.initState();
     context.read<SubscriptionProvider>().loadStatus();
     // Reload subscription status when auth changes (e.g. after login)
-    context.read<AuthProvider>().addListener(_onAuthChange);
+    _authProvider = context.read<AuthProvider>();
+    _authProvider.addListener(_onAuthChange);
   }
 
   void _onAuthChange() {
@@ -31,27 +40,28 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   @override
   void dispose() {
-    context.read<AuthProvider>().removeListener(_onAuthChange);
+    _authProvider.removeListener(_onAuthChange);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<SubscriptionProvider>(
-      builder: (_, provider, _) => Scaffold(
+      builder: (_, provider, _) {
+        final canManageTeam = provider.currentTier == StorageTier.unlimited;
+        return Scaffold(
         key: _scaffoldKey,
         appBar: AppBar(
           title: const Text('Langganan'),
-          actions: [
-            if (provider.isPro)
-              IconButton(
-                icon: const Icon(Icons.menu),
-                tooltip: 'Menu Tim',
-                onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
-              ),
-          ],
+          leading: canManageTeam
+              ? IconButton(
+                  icon: const Icon(Icons.groups_rounded),
+                  tooltip: 'Menu Tim',
+                  onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                )
+              : null,
         ),
-        endDrawer: provider.isPro ? _buildTeamDrawer(context) : null,
+        drawer: canManageTeam ? _buildTeamDrawer(context) : null,
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -83,19 +93,29 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        provider.scanLimit < 0
+                        provider.cycleAllowance < 0
                             ? 'Scan tanpa batas'
-                            : '${provider.totalScanned} / ${provider.scanLimitDisplay} scan digunakan',
+                            : '${provider.cycleUsed} / ${provider.cycleAllowance} scan di periode aktif',
                         style: TextStyle(
                           fontSize: 14,
                           color: provider.isPro ? Colors.white70 : null,
                         ),
                       ),
-                      if (provider.scanLimit >= 0) ...[
+                      if (provider.activeFrom != null && provider.activeUntil != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Aktif: ${_fmtDate(provider.activeFrom!)} - ${_fmtDate(provider.activeUntil!)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: provider.isPro ? Colors.white70 : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                      if (provider.cycleAllowance >= 0) ...[
                         const SizedBox(height: 8),
                         LinearProgressIndicator(
-                          value: provider.scanLimit > 0
-                              ? (provider.totalScanned / provider.scanLimit).clamp(0.0, 1.0)
+                          value: provider.cycleAllowance > 0
+                              ? (provider.cycleUsed / provider.cycleAllowance).clamp(0.0, 1.0)
                               : 0,
                           backgroundColor: provider.isPro ? Colors.white24 : Colors.grey[300],
                           color: provider.remainingFree > 20
@@ -106,7 +126,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${provider.remainingFree >= 0 ? provider.remainingFree : 0} scan tersisa bulan ini',
+                          '${provider.remainingFree >= 0 ? provider.remainingFree : 0} scan tersisa di periode ini',
                           style: TextStyle(
                             fontSize: 12,
                             color: provider.isPro ? Colors.white70 : Colors.grey[600],
@@ -155,6 +175,66 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                     ),
                   );
+                },
+              ),
+
+              // Status tim — visible untuk semua user login
+              Consumer<AuthProvider>(
+                builder: (_, auth, _) {
+                  if (!auth.isLoggedIn) return const SizedBox.shrink();
+                  if (auth.hasTeam && provider.currentTier != StorageTier.unlimited) {
+                    // Anggota tim biasa (bukan Unlimited): tampilkan info tim + tombol keluar
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Card(
+                        color: Colors.blue.withAlpha(20),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            children: [
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const CircleAvatar(
+                                  backgroundColor: Colors.blue,
+                                  child: Icon(Icons.groups, color: Colors.white),
+                                ),
+                                title: Text(auth.currentTeam!.name,
+                                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                                subtitle: const Text('Anggota Tim • Scan Unlimited'),
+                              ),
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                    side: const BorderSide(color: Colors.red),
+                                  ),
+                                  onPressed: () => _showLeaveTeamDialog(context, auth),
+                                  icon: const Icon(Icons.exit_to_app),
+                                  label: const Text('Keluar Tim'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  if (!auth.hasTeam) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showJoinTeamDialog(context, auth),
+                          icon: const Icon(Icons.group_add_outlined),
+                          label: const Text('Gabung Tim'),
+                        ),
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
                 },
               ),
 
@@ -243,12 +323,66 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                     ),
                     title: Text('Paket ${provider.tierName} Aktif'),
                     subtitle: Text(
-                      provider.scanLimit < 0
-                          ? 'Scan tanpa batas • ${provider.tierPrice}/bulan'
-                          : '${provider.scanLimitDisplay} scan/bulan • ${provider.tierPrice}/bulan',
+                      provider.subscriptionActive
+                          ? 'Aktif ${provider.activeFrom != null ? _fmtDate(provider.activeFrom!) : '-'} s/d ${provider.activeUntil != null ? _fmtDate(provider.activeUntil!) : '-'}'
+                          : 'Paket tidak aktif (expired). Perpanjang untuk scan lagi.',
                     ),
                   ),
                 ),
+                if (canManageTeam) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          AppTheme.primaryColor.withAlpha(230),
+                          AppTheme.primaryColor.withAlpha(170),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.groups_rounded, color: Colors.white),
+                            SizedBox(width: 8),
+                            Text(
+                              'Kelola Tim',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Atur anggota tim dan kode invite dari panel khusus.',
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppTheme.primaryColor,
+                          ),
+                          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                          icon: const Icon(Icons.menu_open_rounded),
+                          label: const Text('Buka Menu Tim'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
 
               // Debug toggle (remove in production)
@@ -265,7 +399,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             ],
           ),
         ),
-      ),
+      );
+      },
     );
   }
 
@@ -278,11 +413,43 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Tim',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.primaryColor,
+                        AppTheme.primaryColor.withAlpha(190),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Row(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: Colors.white24,
+                        child: Icon(Icons.groups_2_rounded, color: Colors.white),
+                      ),
+                      SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Menu Tim',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Kelola anggota & akses bersama',
+                            style: TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -308,15 +475,60 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(
+                        ClipboardData(text: auth.currentTeam!.inviteCode),
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Kode invite disalin')),
+                      );
+                    },
+                    icon: const Icon(Icons.share),
+                    label: const Text('Salin Kode Invite'),
+                  ),
                 ] else ...[
-                  FilledButton(
-                    onPressed: () => _showCreateTeamDialog(context, auth),
-                    child: const Text('Buat Tim Baru'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () {
+                        if (!auth.isLoggedIn) {
+                          showLoginDialog(context);
+                          return;
+                        }
+                        _showCreateTeamDialog(context, auth);
+                      },
+                      icon: const Icon(Icons.add_circle_outline),
+                      label: const Text('Buat Tim Baru'),
+                    ),
                   ),
                   const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: () => _showJoinTeamDialog(context, auth),
-                    child: const Text('Gabung Tim'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(46),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () {
+                        if (!auth.isLoggedIn) {
+                          showLoginDialog(context);
+                          return;
+                        }
+                        _showJoinTeamDialog(context, auth);
+                      },
+                      icon: const Icon(Icons.group_add_outlined),
+                      label: const Text('Gabung Tim'),
+                    ),
                   ),
                 ],
               ],
@@ -388,10 +600,60 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             onPressed: () async {
               if (nameCtrl.text.trim().isNotEmpty) {
                 await auth.createTeam(nameCtrl.text.trim());
-                Navigator.pop(dialogCtx);
+                if (!dialogCtx.mounted) return;
+                if (auth.error == null && auth.hasTeam) {
+                  Navigator.pop(dialogCtx);
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text('Tim berhasil dibuat: ${auth.currentTeam?.name ?? ''}'),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text(auth.error ?? 'Gagal membuat tim')),
+                  );
+                }
               }
             },
             child: const Text('Buat'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLeaveTeamDialog(BuildContext ctx, AuthProvider auth) {
+    showDialog(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Keluar dari Tim'),
+        content: Text(
+          'Kamu akan keluar dari tim "${auth.currentTeam?.name ?? ''}". '
+          'Quota scan akan kembali ke paket pribadimu. Lanjutkan?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await auth.leaveTeam();
+              if (!dialogCtx.mounted) return;
+              Navigator.pop(dialogCtx);
+              if (!ctx.mounted) return;
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    auth.error == null
+                        ? 'Berhasil keluar dari tim'
+                        : auth.error!,
+                  ),
+                ),
+              );
+            },
+            child: const Text('Keluar Tim'),
           ),
         ],
       ),
@@ -420,7 +682,19 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             onPressed: () async {
               if (codeCtrl.text.trim().isNotEmpty) {
                 await auth.joinTeam(codeCtrl.text.trim().toUpperCase());
-                Navigator.pop(dialogCtx);
+                if (!dialogCtx.mounted) return;
+                if (auth.error == null && auth.hasTeam) {
+                  Navigator.pop(dialogCtx);
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(
+                      content: Text('Berhasil gabung tim: ${auth.currentTeam?.name ?? ''}'),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    SnackBar(content: Text(auth.error ?? 'Gagal gabung tim')),
+                  );
+                }
               }
             },
             child: const Text('Gabung'),

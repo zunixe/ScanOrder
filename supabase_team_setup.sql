@@ -59,6 +59,25 @@ AS $$
     SELECT team_id FROM team_members WHERE user_id = auth.uid() AND role = 'admin';
 $$;
 
+-- Lookup team by invite code (bypass RLS so non-members can join)
+CREATE OR REPLACE FUNCTION get_team_by_invite_code(code TEXT)
+RETURNS TABLE (
+    id UUID,
+    name TEXT,
+    invite_code TEXT,
+    created_by UUID,
+    created_at TIMESTAMPTZ
+)
+LANGUAGE SQL
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT id, name, invite_code, created_by, created_at
+    FROM teams
+    WHERE invite_code = code
+    LIMIT 1;
+$$;
+
 -- ============================================================
 -- 7. RLS Policies — TEAMS (use helper functions)
 -- ============================================================
@@ -66,11 +85,14 @@ $$;
 DROP POLICY IF EXISTS "team_select" ON teams;
 CREATE POLICY "team_select"
     ON teams FOR SELECT
-    USING (id IN (SELECT get_my_team_ids()));
+    USING (
+        created_by = auth.uid()
+        OR id IN (SELECT get_my_team_ids())
+    );
 
 DROP POLICY IF EXISTS "team_insert" ON teams;
 CREATE POLICY "team_insert"
-    ON teams FOR INSERT
+    ON teams FOR INSERT TO authenticated
     WITH CHECK (auth.uid() = created_by);
 
 DROP POLICY IF EXISTS "team_update" ON teams;
@@ -94,8 +116,40 @@ CREATE POLICY "member_select"
 
 DROP POLICY IF EXISTS "member_insert" ON team_members;
 CREATE POLICY "member_insert"
-    ON team_members FOR INSERT
-    WITH CHECK (team_id IN (SELECT get_my_admin_team_ids()));
+    ON team_members FOR INSERT TO authenticated
+    WITH CHECK (
+        -- Admin bisa tambah siapa saja ke timnya
+        team_id IN (SELECT get_my_admin_team_ids())
+        OR
+        -- Creator bisa insert dirinya sebagai admin saat buat tim
+        (
+            user_id = auth.uid()
+            AND role = 'admin'
+            AND EXISTS (
+                SELECT 1 FROM teams t
+                WHERE t.id = team_id AND t.created_by = auth.uid()
+            )
+        )
+        OR
+        -- User bisa join sendiri sebagai member (via invite code)
+        (
+            user_id = auth.uid()
+            AND role = 'member'
+        )
+    );
+
+DROP POLICY IF EXISTS "member_update" ON team_members;
+CREATE POLICY "member_update"
+    ON team_members FOR UPDATE
+    USING (team_id IN (SELECT get_my_admin_team_ids()));
+
+DROP POLICY IF EXISTS "member_delete" ON team_members;
+CREATE POLICY "member_delete"
+    ON team_members FOR DELETE
+    USING (
+        user_id = auth.uid()
+        OR team_id IN (SELECT get_my_admin_team_ids())
+    );
 
 -- ============================================================
 -- 9. RLS Policies — ORDERS
@@ -125,3 +179,37 @@ CREATE INDEX IF NOT EXISTS idx_orders_team_id ON orders(team_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_team_id ON team_members(team_id);
 CREATE INDEX IF NOT EXISTS idx_teams_invite_code ON teams(invite_code);
+
+-- ============================================================
+-- 11. Table: user_subscriptions (sync state langganan per user)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    tier TEXT NOT NULL DEFAULT 'free',
+    active_from TIMESTAMPTZ,
+    active_until TIMESTAMPTZ,
+    cycle_allowance INTEGER NOT NULL DEFAULT 10,
+    cycle_used INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "subscription_select_own" ON user_subscriptions;
+CREATE POLICY "subscription_select_own"
+    ON user_subscriptions FOR SELECT TO authenticated
+    USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "subscription_insert_own" ON user_subscriptions;
+CREATE POLICY "subscription_insert_own"
+    ON user_subscriptions FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "subscription_update_own" ON user_subscriptions;
+CREATE POLICY "subscription_update_own"
+    ON user_subscriptions FOR UPDATE TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_updated_at ON user_subscriptions(updated_at);

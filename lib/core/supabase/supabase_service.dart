@@ -210,20 +210,17 @@ class SupabaseService {
     }
   }
 
-  /// Cari team berdasarkan invite code
+  /// Cari team berdasarkan invite code (via SECURITY DEFINER untuk bypass RLS)
   Future<Team?> getTeamByInviteCode(String code) async {
     final client = _client;
     if (client == null) return null;
     try {
       final response = await client
-          .from('teams')
-          .select()
-          .eq('invite_code', code.trim())
-          .maybeSingle();
-      if (response == null) return null;
-      return Team.fromMap(response);
+          .rpc('get_team_by_invite_code', params: {'code': code.trim().toUpperCase()});
+      if (response == null || (response as List).isEmpty) return null;
+      return Team.fromMap(Map<String, dynamic>.from(response.first));
     } catch (e) {
-      debugPrint('[Supabase] Get team error: $e');
+      debugPrint('[Supabase] Get team by invite error: $e');
       return null;
     }
   }
@@ -256,6 +253,24 @@ class SupabaseService {
     } catch (e, st) {
       debugPrint('[Supabase] Join team error: $e');
       debugPrint('[Supabase] Stack: $st');
+      return false;
+    }
+  }
+
+  /// Keluar dari tim (hapus diri dari team_members)
+  Future<bool> leaveTeam() async {
+    final client = _client;
+    if (client == null) return false;
+    final user = currentUser;
+    if (user == null) return false;
+    try {
+      await client
+          .from('team_members')
+          .delete()
+          .eq('user_id', user.id);
+      return true;
+    } catch (e) {
+      debugPrint('[Supabase] Leave team error: $e');
       return false;
     }
   }
@@ -342,6 +357,41 @@ class SupabaseService {
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchMySubscription() async {
+    final client = _client;
+    if (client == null) return null;
+    final user = currentUser;
+    if (user == null) return null;
+    try {
+      final res = await client
+          .from('user_subscriptions')
+          .select()
+          .eq('user_id', user.id)
+          .maybeSingle();
+      if (res == null) return null;
+      return Map<String, dynamic>.from(res);
+    } catch (e) {
+      debugPrint('[Supabase] fetch subscription error: $e');
+      return null;
+    }
+  }
+
+  Future<void> upsertMySubscription(Map<String, dynamic> payload) async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    try {
+      await client.from('user_subscriptions').upsert({
+        'user_id': user.id,
+        ...payload,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('[Supabase] upsert subscription error: $e');
     }
   }
 

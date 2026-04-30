@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/db/database_helper.dart';
+import '../core/supabase/supabase_service.dart';
 
 enum StorageTier { free, basic, pro, unlimited }
 
@@ -9,7 +10,6 @@ class QuotaService {
   static const int _freeScans = 10;
   static const int _basicScans = 1000;
   static const int _proScans = 5000;
-  static const int _unlimitedScans = -1; // unlimited
 
   // Harga per tier (IDR)
   static const int _basicPrice = 29000;
@@ -23,22 +23,113 @@ class QuotaService {
 
 
   final DatabaseHelper _db = DatabaseHelper.instance;
+  final SupabaseService _supabase = SupabaseService();
+  static const String _tierKey = 'storage_tier';
+  static const String _cycleStartKey = 'subscription_cycle_start_ms';
+  static const String _cycleEndKey = 'subscription_cycle_end_ms';
+  static const String _cycleAllowanceKey = 'subscription_cycle_allowance';
+  static const String _cycleUsedKey = 'subscription_cycle_used';
+  static const int _cycleDays = 30;
 
-  Future<int> _getScanLimitForTier(StorageTier tier) async {
+  int _defaultAllowanceForTier(StorageTier tier) {
     switch (tier) {
-      case StorageTier.free: return _freeScans;
-      case StorageTier.basic: return _basicScans;
-      case StorageTier.pro: return _proScans;
-      case StorageTier.unlimited: return _unlimitedScans;
+      case StorageTier.free:
+        return _freeScans;
+      case StorageTier.basic:
+        return _basicScans;
+      case StorageTier.pro:
+        return _proScans;
+      case StorageTier.unlimited:
+        return -1;
     }
   }
 
-  Future<bool> canScan() async {
-    final total = await getTotalScanned();
+  Future<void> _ensureCycleInitialized() async {
+    final prefs = await SharedPreferences.getInstance();
+    final startMs = prefs.getInt(_cycleStartKey);
+    final endMs = prefs.getInt(_cycleEndKey);
+    final allowance = prefs.getInt(_cycleAllowanceKey);
+    if (startMs != null && endMs != null && allowance != null) return;
+
+    final now = DateTime.now();
     final tier = await getTier();
-    final limit = await _getScanLimitForTier(tier);
-    if (limit < 0) return true; // unlimited
-    return total < limit;
+    await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
+    await prefs.setInt(_cycleEndKey, now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_cycleAllowanceKey, _defaultAllowanceForTier(tier));
+    await prefs.setInt(_cycleUsedKey, 0);
+  }
+
+  Future<void> _autoRollFreeCycleIfNeeded() async {
+    await _ensureCycleInitialized();
+    final tier = await getTier();
+    if (tier != StorageTier.free) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final endMs = prefs.getInt(_cycleEndKey) ?? 0;
+    if (DateTime.now().millisecondsSinceEpoch <= endMs) return;
+
+    final now = DateTime.now();
+    await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
+    await prefs.setInt(_cycleEndKey, now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_cycleAllowanceKey, _freeScans);
+    await prefs.setInt(_cycleUsedKey, 0);
+  }
+
+  Future<bool> canScan() async {
+    await _autoRollFreeCycleIfNeeded();
+    final tier = await getTier();
+    final active = await isSubscriptionActive();
+    if (tier != StorageTier.free && !active) return false;
+
+    final allowance = await getCycleAllowance();
+    final used = await getUsedInCurrentCycle();
+    if (allowance < 0) return true;
+    return used < allowance;
+  }
+
+  Future<void> consumeScan() async {
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final used = prefs.getInt(_cycleUsedKey) ?? 0;
+    await prefs.setInt(_cycleUsedKey, used + 1);
+    await syncToCloud();
+  }
+
+  Future<bool> isSubscriptionActive() async {
+    await _autoRollFreeCycleIfNeeded();
+    final tier = await getTier();
+    if (tier == StorageTier.free) return true;
+    final end = await getActiveUntil();
+    if (end == null) return false;
+    return DateTime.now().isBefore(end);
+  }
+
+  Future<DateTime?> getActiveFrom() async {
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final startMs = prefs.getInt(_cycleStartKey);
+    if (startMs == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(startMs);
+  }
+
+  Future<DateTime?> getActiveUntil() async {
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final endMs = prefs.getInt(_cycleEndKey);
+    if (endMs == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(endMs);
+  }
+
+  Future<int> getCycleAllowance() async {
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_cycleAllowanceKey) ?? _freeScans;
+  }
+
+  Future<int> getUsedInCurrentCycle() async {
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_cycleUsedKey) ?? 0;
   }
 
   Future<bool> canStorePhoto() async {
@@ -58,7 +149,7 @@ class QuotaService {
 
   Future<StorageTier> getTier() async {
     final prefs = await SharedPreferences.getInstance();
-    final tier = prefs.getString('storage_tier') ?? 'free';
+    final tier = prefs.getString(_tierKey) ?? 'free';
     switch (tier) {
       case 'basic': return StorageTier.basic;
       case 'pro': return StorageTier.pro;
@@ -104,16 +195,14 @@ class QuotaService {
   }
 
   Future<int> getRemainingFreeScans() async {
-    final total = await getTotalScanned();
-    final tier = await getTier();
-    final limit = await _getScanLimitForTier(tier);
-    if (limit < 0) return -1; // unlimited
-    return (limit - total).clamp(0, limit);
+    final allowance = await getCycleAllowance();
+    final used = await getUsedInCurrentCycle();
+    if (allowance < 0) return -1;
+    return (allowance - used).clamp(0, allowance);
   }
 
   Future<int> getScanLimit() async {
-    final tier = await getTier();
-    return _getScanLimitForTier(tier);
+    return getCycleAllowance();
   }
 
   String getScanLimitDisplay(StorageTier tier) {
@@ -151,15 +240,97 @@ class QuotaService {
 
   Future<bool> isPro() async {
     final tier = await getTier();
-    return tier.index >= StorageTier.basic.index;
+    if (tier.index < StorageTier.basic.index) return false;
+    return isSubscriptionActive();
   }
 
   Future<void> setTier(StorageTier tier) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('storage_tier', tier.name);
+    await prefs.setString(_tierKey, tier.name);
+    await _ensureCycleInitialized();
+    await syncToCloud();
+  }
+
+  Future<void> purchaseOrChangeTier(StorageTier newTier) async {
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final oldTier = await getTier();
+    final wasActive = await isSubscriptionActive();
+    final oldAllowance = await getCycleAllowance();
+    final oldUsed = await getUsedInCurrentCycle();
+    final oldRemaining = oldAllowance < 0 ? -1 : (oldAllowance - oldUsed).clamp(0, oldAllowance);
+
+    final now = DateTime.now();
+    final newBase = _defaultAllowanceForTier(newTier);
+    int newAllowance;
+
+    if (newBase < 0) {
+      newAllowance = -1;
+    } else {
+      final carryOver = (wasActive && oldTier != StorageTier.free && oldRemaining > 0) ? oldRemaining : 0;
+      newAllowance = newBase + carryOver;
+    }
+
+    await prefs.setString(_tierKey, newTier.name);
+    await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
+    await prefs.setInt(_cycleEndKey, now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_cycleAllowanceKey, newAllowance);
+    await prefs.setInt(_cycleUsedKey, 0);
+    await syncToCloud();
   }
 
   Future<void> setPro(bool value) async {
-    await setTier(value ? StorageTier.pro : StorageTier.free);
+    await purchaseOrChangeTier(value ? StorageTier.pro : StorageTier.free);
+  }
+
+  Future<void> syncFromCloud() async {
+    if (_supabase.currentUser == null) return;
+    final cloud = await _supabase.fetchMySubscription();
+    if (cloud == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final tier = (cloud['tier'] as String?) ?? 'free';
+    final activeFrom = cloud['active_from'] as String?;
+    final activeUntil = cloud['active_until'] as String?;
+    final allowance = (cloud['cycle_allowance'] as num?)?.toInt();
+    final used = (cloud['cycle_used'] as num?)?.toInt();
+
+    await prefs.setString(_tierKey, tier);
+    if (activeFrom != null) {
+      await prefs.setInt(_cycleStartKey, DateTime.parse(activeFrom).millisecondsSinceEpoch);
+    }
+    if (activeUntil != null) {
+      await prefs.setInt(_cycleEndKey, DateTime.parse(activeUntil).millisecondsSinceEpoch);
+    }
+    if (allowance != null) {
+      await prefs.setInt(_cycleAllowanceKey, allowance);
+    }
+    if (used != null) {
+      await prefs.setInt(_cycleUsedKey, used);
+    }
+  }
+
+  Future<void> syncToCloud() async {
+    if (_supabase.currentUser == null) return;
+    await _ensureCycleInitialized();
+    final prefs = await SharedPreferences.getInstance();
+
+    final tier = prefs.getString(_tierKey) ?? 'free';
+    final startMs = prefs.getInt(_cycleStartKey);
+    final endMs = prefs.getInt(_cycleEndKey);
+    final allowance = prefs.getInt(_cycleAllowanceKey) ?? _freeScans;
+    final used = prefs.getInt(_cycleUsedKey) ?? 0;
+
+    await _supabase.upsertMySubscription({
+      'tier': tier,
+      'active_from': startMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(startMs).toIso8601String()
+          : null,
+      'active_until': endMs != null
+          ? DateTime.fromMillisecondsSinceEpoch(endMs).toIso8601String()
+          : null,
+      'cycle_allowance': allowance,
+      'cycle_used': used,
+    });
   }
 }

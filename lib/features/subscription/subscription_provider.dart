@@ -14,8 +14,14 @@ class SubscriptionProvider extends ChangeNotifier {
   int usedBytes = 0;
   int totalBytes = 0;
   StorageTier currentTier = StorageTier.free;
+  DateTime? activeFrom;
+  DateTime? activeUntil;
+  bool subscriptionActive = true;
+  int cycleAllowance = 0;
+  int cycleUsed = 0;
 
   Future<void> loadStatus() async {
+    await _quota.syncFromCloud();
     isPro = await _quota.isPro();
     totalScanned = await _quota.getTotalScanned();
     remainingFree = await _quota.getRemainingFreeScans();
@@ -26,6 +32,11 @@ class SubscriptionProvider extends ChangeNotifier {
     tierPrice = _quota.getPriceDisplay(currentTier);
     usedBytes = await _quota.getUsedBytes();
     totalBytes = await _quota.getLimit();
+    activeFrom = await _quota.getActiveFrom();
+    activeUntil = await _quota.getActiveUntil();
+    subscriptionActive = await _quota.isSubscriptionActive();
+    cycleAllowance = await _quota.getCycleAllowance();
+    cycleUsed = await _quota.getUsedInCurrentCycle();
     notifyListeners();
   }
 
@@ -37,7 +48,7 @@ class SubscriptionProvider extends ChangeNotifier {
   Future<void> purchaseTier(StorageTier tier) async {
     // TODO: Implement IAP purchase logic with in_app_purchase
     // For demo/testing, set tier directly:
-    await _quota.setTier(tier);
+    await _quota.purchaseOrChangeTier(tier);
     await loadStatus();
   }
 

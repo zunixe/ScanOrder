@@ -50,7 +50,7 @@ class ScanProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<ScanResult?> processScan(String rawCode, String? photoPath) async {
+  Future<ScanResult?> processScan(String rawCode, String? photoPath, {String? teamId}) async {
     if (_processing) return null;
     _processing = true;
 
@@ -76,8 +76,8 @@ class ScanProvider extends ChangeNotifier {
         return lastResult;
       }
 
-      // Check quota
-      if (!await _quota.canScan()) {
+      // Check quota (skip jika user adalah anggota tim — tim = unlimited)
+      if (teamId == null && !await _quota.canScan()) {
         lastResult = ScanResult(
           status: ScanStatus.quotaExceeded,
           resi: resi,
@@ -115,9 +115,11 @@ class ScanProvider extends ChangeNotifier {
       );
 
       await _db.insertOrder(order);
+      // Jangan kurangi quota pribadi jika user anggota tim (tim = unlimited)
+      if (teamId == null) await _quota.consumeScan();
 
       // Sync ke Supabase backend (async, tidak blocking)
-      _syncToSupabase(order);
+      _syncToSupabase(order, teamId: teamId);
 
       todayCount++;
       totalCount++;
@@ -143,7 +145,7 @@ class ScanProvider extends ChangeNotifier {
   }
 
   /// Ambil device ID dan kirim ke Supabase (async, tidak blocking)
-  void _syncToSupabase(ScannedOrder order) async {
+  void _syncToSupabase(ScannedOrder order, {String? teamId}) async {
     try {
       final supabase = SupabaseService();
       final user = supabase.currentUser;
@@ -159,12 +161,11 @@ class ScanProvider extends ChangeNotifier {
         deviceId = iosInfo.identifierForVendor ?? 'unknown';
       }
 
-      // Try to get team_id
-      final team = await supabase.getMyTeam();
-      final teamId = team?.id;
+      // Gunakan teamId dari parameter (sudah diketahui di processScan)
+      final resolvedTeamId = teamId ?? (await supabase.getMyTeam())?.id;
 
-      if (teamId != null) {
-        await supabase.insertOrderWithTeam(order, deviceId: deviceId, teamId: teamId);
+      if (resolvedTeamId != null) {
+        await supabase.insertOrderWithTeam(order, deviceId: deviceId, teamId: resolvedTeamId);
       } else {
         await supabase.insertOrder(order, deviceId: deviceId);
       }
