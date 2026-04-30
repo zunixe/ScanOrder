@@ -66,7 +66,7 @@ $$;
 DROP POLICY IF EXISTS "team_select" ON teams;
 CREATE POLICY "team_select"
     ON teams FOR SELECT
-    USING (id IN (SELECT get_my_team_ids));
+    USING (id IN (SELECT get_my_team_ids()));
 
 DROP POLICY IF EXISTS "team_insert" ON teams;
 CREATE POLICY "team_insert"
@@ -76,12 +76,12 @@ CREATE POLICY "team_insert"
 DROP POLICY IF EXISTS "team_update" ON teams;
 CREATE POLICY "team_update"
     ON teams FOR UPDATE
-    USING (id IN (SELECT get_my_admin_team_ids));
+    USING (id IN (SELECT get_my_admin_team_ids()));
 
 DROP POLICY IF EXISTS "team_delete" ON teams;
 CREATE POLICY "team_delete"
     ON teams FOR DELETE
-    USING (id IN (SELECT get_my_admin_team_ids));
+    USING (id IN (SELECT get_my_admin_team_ids()));
 
 -- ============================================================
 -- 8. RLS Policies — TEAM_MEMBERS (use helper functions)
@@ -90,12 +90,12 @@ CREATE POLICY "team_delete"
 DROP POLICY IF EXISTS "member_select" ON team_members;
 CREATE POLICY "member_select"
     ON team_members FOR SELECT
-    USING (team_id IN (SELECT get_my_team_ids));
+    USING (team_id IN (SELECT get_my_team_ids()));
 
 DROP POLICY IF EXISTS "member_insert" ON team_members;
 CREATE POLICY "member_insert"
     ON team_members FOR INSERT
-    WITH CHECK (team_id IN (SELECT get_my_admin_team_ids));
+    WITH CHECK (team_id IN (SELECT get_my_admin_team_ids()));
 
 -- ============================================================
 -- 9. RLS Policies — ORDERS
@@ -106,7 +106,7 @@ CREATE POLICY "orders_select"
     ON orders FOR SELECT
     USING (
         auth.uid() = user_id
-        OR team_id IN (SELECT get_my_team_ids)
+        OR team_id IN (SELECT get_my_team_ids())
     );
 
 DROP POLICY IF EXISTS "orders_insert" ON orders;

@@ -35,13 +35,6 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: Consumer<AuthProvider>(
         builder: (_, auth, _) {
-          if (auth.isLoggedIn) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              Navigator.pop(context);
-              widget.onSuccess?.call();
-            });
-            return const SizedBox.shrink();
-          }
           return ConstrainedBox(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.7,
@@ -100,13 +93,17 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
                     FilledButton(
                       onPressed: auth.isLoading
                           ? null
-                          : () {
+                          : () async {
                               final email = _emailCtrl.text.trim();
                               final pass = _passCtrl.text;
                               if (_isSignup) {
-                                auth.signUp(email, pass);
+                                await auth.signUp(email, pass);
                               } else {
-                                auth.signIn(email, pass);
+                                await auth.signIn(email, pass);
+                              }
+                              if (auth.error == null && auth.isLoggedIn && mounted) {
+                                Navigator.pop(context);
+                                widget.onSuccess?.call();
                               }
                             },
                       child: auth.isLoading
