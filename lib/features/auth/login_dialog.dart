@@ -34,7 +34,7 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: Consumer<AuthProvider>(
-        builder: (_, auth, __) {
+        builder: (_, auth, _) {
           if (auth.isLoggedIn) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               Navigator.pop(context);

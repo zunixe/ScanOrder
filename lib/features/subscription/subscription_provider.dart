@@ -7,6 +7,10 @@ class SubscriptionProvider extends ChangeNotifier {
   bool isPro = false;
   int totalScanned = 0;
   int remainingFree = 0;
+  int scanLimit = 0;
+  String scanLimitDisplay = '';
+  String tierName = 'Gratis';
+  String tierPrice = 'Gratis';
   int usedBytes = 0;
   int totalBytes = 0;
   StorageTier currentTier = StorageTier.free;
@@ -15,9 +19,13 @@ class SubscriptionProvider extends ChangeNotifier {
     isPro = await _quota.isPro();
     totalScanned = await _quota.getTotalScanned();
     remainingFree = await _quota.getRemainingFreeScans();
+    scanLimit = await _quota.getScanLimit();
+    currentTier = await _quota.getTier();
+    scanLimitDisplay = _quota.getScanLimitDisplay(currentTier);
+    tierName = _quota.getTierName(currentTier);
+    tierPrice = _quota.getPriceDisplay(currentTier);
     usedBytes = await _quota.getUsedBytes();
     totalBytes = await _quota.getLimit();
-    currentTier = await _quota.getTier();
     notifyListeners();
   }
 
@@ -26,16 +34,17 @@ class SubscriptionProvider extends ChangeNotifier {
     await loadStatus();
   }
 
-  Future<void> purchasePro() async {
+  Future<void> purchaseTier(StorageTier tier) async {
     // TODO: Implement IAP purchase logic with in_app_purchase
-    // For demo/testing, toggle pro status:
-    await _quota.setPro(true);
+    // For demo/testing, set tier directly:
+    await _quota.setTier(tier);
     await loadStatus();
   }
 
-  // For testing only — remove in production
-  Future<void> toggleProDebug() async {
-    await _quota.setPro(!isPro);
+  // For testing only — cycle through tiers
+  Future<void> toggleTierDebug() async {
+    final nextIndex = (currentTier.index + 1) % 4;
+    await _quota.setTier(StorageTier.values[nextIndex]);
     await loadStatus();
   }
 

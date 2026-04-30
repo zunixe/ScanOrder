@@ -5,7 +5,7 @@ import '../../models/order.dart';
 import '../../models/team.dart';
 
 /// Service untuk sinkronisasi data ke Supabase backend.
-/// 
+///
 /// Setup:
 /// 1. Buat project di https://supabase.com (gratis tier)
 /// 2. Buat table `orders` dengan kolom: id, device_id, resi, marketplace, scanned_at, date, photo_url
@@ -20,22 +20,50 @@ class SupabaseService {
   static const String _supabaseUrl = 'https://rnithriviguzbfpvzrwq.supabase.co';
   static const String _supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJuaXRocml2aWd1emJmcHZ6cndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQwNDksImV4cCI6MjA5MzA0MDA0OX0.3dMU23uT_9uEGHirs0PieViE7k1M_ezlCJ8wjryf2lc';
 
+  bool _isOffline = false;
+  bool get isOffline => _isOffline;
+
   bool get _isConfigured =>
       !_supabaseUrl.contains('YOUR_PROJECT') && !_supabaseKey.contains('YOUR_ANON_KEY');
 
   Future<void> initialize() async {
     if (!_isConfigured) {
-      // Belum dikonfigurasi — skip supabase
+      debugPrint('[Supabase] URL/key masih placeholder — skip');
+      _isOffline = true;
       return;
     }
-    await Supabase.initialize(
-      url: _supabaseUrl,
-      anonKey: _supabaseKey,
-    );
+    // Cek network reachability dulu supaya tidak crash di HP dengan network bermasalah
+    final reachable = await _checkReachability();
+    if (!reachable) {
+      debugPrint('[Supabase] Host tidak bisa di-reach — mode offline aktif');
+      _isOffline = true;
+      return;
+    }
+    try {
+      await Supabase.initialize(
+        url: _supabaseUrl,
+        anonKey: _supabaseKey,
+      );
+      _isOffline = false;
+      debugPrint('[Supabase] Initialized successfully');
+    } catch (e) {
+      debugPrint('[Supabase] Init error: $e');
+      _isOffline = true;
+    }
+  }
+
+  Future<bool> _checkReachability() async {
+    try {
+      final uri = Uri.parse(_supabaseUrl);
+      final result = await InternetAddress.lookup(uri.host).timeout(const Duration(seconds: 5));
+      return result.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
   }
 
   SupabaseClient? get _client {
-    if (!_isConfigured) return null;
+    if (_isOffline || !_isConfigured) return null;
     try {
       return Supabase.instance.client;
     } catch (_) {

@@ -304,7 +304,7 @@ class _ScanPageState extends State<ScanPage> {
                         const SizedBox(width: 8),
                         // Photo save toggle
                         Consumer<ScanProvider>(
-                          builder: (_, provider, __) => IconButton(
+                          builder: (_, provider, _) => IconButton(
                             onPressed: () => provider.setSavePhoto(!provider.savePhoto),
                             icon: Icon(
                               provider.savePhoto ? Icons.photo_camera : Icons.photo_camera_outlined,

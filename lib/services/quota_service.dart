@@ -5,22 +5,40 @@ import '../core/db/database_helper.dart';
 enum StorageTier { free, basic, pro, unlimited }
 
 class QuotaService {
-  // Storage limits per tier (bytes)
+  // Scan limits per tier (per bulan)
+  static const int _freeScans = 10;
+  static const int _basicScans = 1000;
+  static const int _proScans = 5000;
+  static const int _unlimitedScans = -1; // unlimited
+
+  // Harga per tier (IDR)
+  static const int _basicPrice = 29000;
+  static const int _proPrice = 99000;
+  static const int _teamPrice = 399000;
+
+  // Storage limits per tier (bytes) - untuk info foto saja
   static const int _freeLimit = 100 * 1024 * 1024;       // 100MB
   static const int _basicLimit = 2 * 1024 * 1024 * 1024; // 2GB
   static const int _proLimit = 10 * 1024 * 1024 * 1024;  // 10GB
 
-  // Scan limits per tier
-  static const int _freeScans = 10000;
 
   final DatabaseHelper _db = DatabaseHelper.instance;
+
+  Future<int> _getScanLimitForTier(StorageTier tier) async {
+    switch (tier) {
+      case StorageTier.free: return _freeScans;
+      case StorageTier.basic: return _basicScans;
+      case StorageTier.pro: return _proScans;
+      case StorageTier.unlimited: return _unlimitedScans;
+    }
+  }
 
   Future<bool> canScan() async {
     final total = await getTotalScanned();
     final tier = await getTier();
-    if (tier.index >= StorageTier.pro.index) return true;
-    if (tier == StorageTier.basic) return total < _freeScans * 2;
-    return total < _freeScans;
+    final limit = await _getScanLimitForTier(tier);
+    if (limit < 0) return true; // unlimited
+    return total < limit;
   }
 
   Future<bool> canStorePhoto() async {
@@ -88,9 +106,47 @@ class QuotaService {
   Future<int> getRemainingFreeScans() async {
     final total = await getTotalScanned();
     final tier = await getTier();
-    if (tier.index >= StorageTier.pro.index) return -1;
-    if (tier == StorageTier.basic) return (_freeScans * 2 - total).clamp(0, _freeScans * 2);
-    return (_freeScans - total).clamp(0, _freeScans);
+    final limit = await _getScanLimitForTier(tier);
+    if (limit < 0) return -1; // unlimited
+    return (limit - total).clamp(0, limit);
+  }
+
+  Future<int> getScanLimit() async {
+    final tier = await getTier();
+    return _getScanLimitForTier(tier);
+  }
+
+  String getScanLimitDisplay(StorageTier tier) {
+    switch (tier) {
+      case StorageTier.free: return '$_freeScans';
+      case StorageTier.basic: return '$_basicScans';
+      case StorageTier.pro: return '${_proScans ~/ 1000}rb';
+      case StorageTier.unlimited: return '∞';
+    }
+  }
+
+  String getTierName(StorageTier tier) {
+    switch (tier) {
+      case StorageTier.free: return 'Gratis';
+      case StorageTier.basic: return 'Basic';
+      case StorageTier.pro: return 'Pro';
+      case StorageTier.unlimited: return 'Team';
+    }
+  }
+
+  int getPriceForTier(StorageTier tier) {
+    switch (tier) {
+      case StorageTier.free: return 0;
+      case StorageTier.basic: return _basicPrice;
+      case StorageTier.pro: return _proPrice;
+      case StorageTier.unlimited: return _teamPrice;
+    }
+  }
+
+  String getPriceDisplay(StorageTier tier) {
+    final price = getPriceForTier(tier);
+    if (price == 0) return 'Gratis';
+    return 'Rp ${price.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
   }
 
   Future<bool> isPro() async {

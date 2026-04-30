@@ -79,6 +79,16 @@ class DatabaseHelper {
     return maps.map((m) => ScannedOrder.fromMap(m)).toList();
   }
 
+  Future<int> updateOrderPhoto(int id, String? photoPath) async {
+    final db = await database;
+    return await db.update(
+      'orders',
+      {'photo_path': photoPath},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<List<ScannedOrder>> searchOrders(String query) async {
     final db = await database;
     final maps = await db.query(

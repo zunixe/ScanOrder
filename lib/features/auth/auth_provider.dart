@@ -24,17 +24,19 @@ class AuthProvider extends ChangeNotifier {
 
   AuthProvider() {
     _checkAuth();
-    _supabase.authStateChanges.listen((state) {
-      _isLoggedIn = state.session != null;
-      if (_isLoggedIn) {
-        _checkAdminPro();
-        _loadTeam();
-        syncOnLogin();
-      } else {
-        _currentTeam = null;
-      }
-      notifyListeners();
-    });
+    if (!_supabase.isOffline) {
+      _supabase.authStateChanges.listen((state) {
+        _isLoggedIn = state.session != null;
+        if (_isLoggedIn) {
+          _checkAdminPro();
+          _loadTeam();
+          syncOnLogin();
+        } else {
+          _currentTeam = null;
+        }
+        notifyListeners();
+      });
+    }
   }
 
   void _checkAuth() {
@@ -105,11 +107,21 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signUp(String email, String password) async {
+    if (_supabase.isOffline) {
+      _error = 'Tidak ada koneksi ke server. Pastikan internet aktif atau server Supabase tersedia.';
+      notifyListeners();
+      return;
+    }
     _isLoading = true;
     _error = null;
     notifyListeners();
     try {
-      await _supabase.client!.auth.signUp(
+      final client = _supabase.client;
+      if (client == null) {
+        _error = 'Koneksi ke server belum tersedia. Coba lagi nanti.';
+        return;
+      }
+      await client.auth.signUp(
         email: email,
         password: password,
       );
@@ -123,11 +135,21 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signIn(String email, String password) async {
+    if (_supabase.isOffline) {
+      _error = 'Tidak ada koneksi ke server. Pastikan internet aktif atau server Supabase tersedia.';
+      notifyListeners();
+      return;
+    }
     _isLoading = true;
     _error = null;
     notifyListeners();
     try {
-      await _supabase.client!.auth.signInWithPassword(
+      final client = _supabase.client;
+      if (client == null) {
+        _error = 'Koneksi ke server belum tersedia. Coba lagi nanti.';
+        return;
+      }
+      await client.auth.signInWithPassword(
         email: email,
         password: password,
       );

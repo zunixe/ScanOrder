@@ -47,6 +47,7 @@ dependencies:
   supabase_flutter: ^2.8.0
   device_info_plus: ^11.5.0
   google_sign_in: ^6.2.0
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -55,14 +56,22 @@ dev_dependencies:
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
+  # package. See that file for information on deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo/scanorder_icon.png"
+  adaptive_icon_background: "#2563EB"
+  adaptive_icon_foreground: "assets/logo/scanorder_icon.png"
+
 flutter:
 
   # The following line ensures that the Material Icons font is
@@ -72,6 +81,7 @@ flutter:
 
   assets:
     - assets/sounds/
+    - assets/logo/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

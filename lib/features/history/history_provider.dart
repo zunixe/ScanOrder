@@ -61,6 +61,11 @@ class HistoryProvider extends ChangeNotifier {
     await loadOrders();
   }
 
+  Future<void> updatePhoto(int id, String? photoPath) async {
+    await _db.updateOrderPhoto(id, photoPath);
+    await loadOrders();
+  }
+
   Future<List<ScannedOrder>> getAllForExport() async {
     return await _db.getAllOrders();
   }

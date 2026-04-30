@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
@@ -234,7 +235,7 @@ class _HistoryPageState extends State<HistoryPage> {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       itemCount: provider.orders.length,
                       itemBuilder: (_, i) =>
-                          _OrderTile(order: provider.orders[i]),
+                          _OrderTile(order: provider.orders[i], isLatest: i == 0),
                     ),
             ),
           ],
@@ -254,11 +255,41 @@ class _HistoryPageState extends State<HistoryPage> {
     if (d == today.subtract(const Duration(days: 1))) return 'Kemarin';
     return DateFormat('dd MMM yyyy', 'id').format(date);
   }
+
+  Future<void> _scanToSearch(BuildContext ctx, HistoryProvider provider) async {
+    final result = await showDialog<String>(
+      context: ctx,
+      builder: (scanCtx) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Scan Resi'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(scanCtx),
+            ),
+          ),
+          body: MobileScanner(
+            onDetect: (capture) {
+              final barcode = capture.barcodes.firstOrNull;
+              if (barcode?.rawValue != null) {
+                Navigator.pop(scanCtx, barcode!.rawValue!);
+              }
+            },
+          ),
+        ),
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      _searchController.text = result;
+      provider.search(result);
+    }
+  }
 }
 
 class _OrderTile extends StatelessWidget {
   final ScannedOrder order;
-  const _OrderTile({required this.order});
+  final bool isLatest;
+  const _OrderTile({required this.order, this.isLatest = false});
 
   @override
   Widget build(BuildContext context) {
@@ -272,11 +303,7 @@ class _OrderTile extends StatelessWidget {
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        margin: const EdgeInsets.symmetric(vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.red[400],
-          borderRadius: BorderRadius.circular(10),
-        ),
+        color: Colors.red,
         child: const Icon(Icons.delete, color: Colors.white),
       ),
       confirmDismiss: (_) async {
@@ -346,6 +373,13 @@ class _OrderTile extends StatelessWidget {
                   size: 16,
                   color: Theme.of(context).colorScheme.primary,
                 ),
+              if (!hasPhoto)
+                IconButton(
+                  icon: const Icon(Icons.add_a_photo, size: 16),
+                  color: Colors.grey,
+                  tooltip: 'Tambah foto',
+                  onPressed: () => _pickNewPhoto(context),
+                ),
               const SizedBox(width: 4),
               Text(
                 time,
@@ -361,6 +395,7 @@ class _OrderTile extends StatelessWidget {
               _showPhotoDialog(context, order.photoPath!);
             }
           },
+          onLongPress: () => _showPhotoOptions(context),
         ),
       ),
     );
@@ -378,6 +413,14 @@ class _OrderTile extends StatelessWidget {
               onPressed: () => Navigator.pop(ctx),
             ),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.edit),
+                tooltip: 'Ganti foto',
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _pickNewPhoto(context);
+                },
+              ),
               IconButton(
                 icon: const Icon(Icons.download),
                 tooltip: 'Download',
@@ -402,35 +445,6 @@ class _OrderTile extends StatelessWidget {
     );
   }
 
-  Future<void> _scanToSearch(BuildContext ctx, HistoryProvider provider) async {
-    final result = await showDialog<String>(
-      context: ctx,
-      builder: (scanCtx) => Dialog.fullscreen(
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Scan Resi'),
-            leading: IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () => Navigator.pop(scanCtx),
-            ),
-          ),
-          body: MobileScanner(
-            onDetect: (capture) {
-              final barcode = capture.barcodes.firstOrNull;
-              if (barcode?.rawValue != null) {
-                Navigator.pop(scanCtx, barcode!.rawValue!);
-              }
-            },
-          ),
-        ),
-      ),
-    );
-    if (result != null && result.isNotEmpty) {
-      _searchController.text = result;
-      provider.search(result);
-    }
-  }
-
   Future<void> _downloadPhoto(BuildContext context, String photoPath) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -449,6 +463,76 @@ class _OrderTile extends StatelessWidget {
           SnackBar(content: Text('Gagal download: $e')),
         );
       }
+    }
+  }
+
+  void _showPhotoOptions(BuildContext context) {
+    final hasPhoto = order.photoPath != null;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Ambil foto dari kamera'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickNewPhoto(context, ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Pilih dari galeri'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickNewPhoto(context, ImageSource.gallery);
+              },
+            ),
+            if (hasPhoto)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Hapus foto', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _removePhoto(context);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickNewPhoto(BuildContext context, [ImageSource? source]) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: source ?? ImageSource.camera,
+      maxWidth: 1920,
+      maxHeight: 1080,
+      imageQuality: 85,
+    );
+    if (picked == null) return;
+
+    final provider = context.read<HistoryProvider>();
+    await provider.updatePhoto(order.id!, picked.path);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Foto berhasil diperbarui')),
+      );
+    }
+  }
+
+  Future<void> _removePhoto(BuildContext context) async {
+    final provider = context.read<HistoryProvider>();
+    await provider.updatePhoto(order.id!, null);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Foto dihapus')),
+      );
     }
   }
 }

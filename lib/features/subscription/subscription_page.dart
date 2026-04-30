@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
+import '../../services/quota_service.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
 import 'subscription_provider.dart';
@@ -25,7 +26,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   @override
   Widget build(BuildContext context) {
     return Consumer<SubscriptionProvider>(
-      builder: (_, provider, __) => Scaffold(
+      builder: (_, provider, _) => Scaffold(
         key: _scaffoldKey,
         appBar: AppBar(
           title: const Text('Langganan'),
@@ -61,7 +62,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        provider.isPro ? 'PRO AKTIF' : 'GRATIS',
+                        provider.tierName.toUpperCase(),
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
@@ -69,34 +70,37 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      if (!provider.isPro) ...[
-                        Text(
-                          '${provider.storageUsed} / ${provider.storageTotal} terpakai',
-                          style: const TextStyle(fontSize: 14),
+                      Text(
+                        provider.scanLimit < 0
+                            ? 'Scan tanpa batas'
+                            : '${provider.totalScanned} / ${provider.scanLimitDisplay} scan digunakan',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: provider.isPro ? Colors.white70 : null,
                         ),
+                      ),
+                      if (provider.scanLimit >= 0) ...[
                         const SizedBox(height: 8),
                         LinearProgressIndicator(
-                          value: provider.storageFraction,
-                          backgroundColor: Colors.grey[300],
-                          color: provider.storageFraction < 0.7
-                              ? AppTheme.successColor
+                          value: provider.scanLimit > 0
+                              ? (provider.totalScanned / provider.scanLimit).clamp(0.0, 1.0)
+                              : 0,
+                          backgroundColor: provider.isPro ? Colors.white24 : Colors.grey[300],
+                          color: provider.remainingFree > 20
+                              ? (provider.isPro ? Colors.white : AppTheme.successColor)
                               : AppTheme.dangerColor,
                           minHeight: 6,
                           borderRadius: BorderRadius.circular(3),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${provider.remainingFree > 0 ? provider.remainingFree : 0} scan tersisa',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                        ),
-                      ] else
-                        const Text(
-                          'Scan tanpa batas!',
+                          '${provider.remainingFree >= 0 ? provider.remainingFree : 0} scan tersisa bulan ini',
                           style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.white70,
+                            fontSize: 12,
+                            color: provider.isPro ? Colors.white70 : Colors.grey[600],
                           ),
                         ),
+                      ],
                     ],
                   ),
                 ),
@@ -106,7 +110,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
               // Cloud Sync Status
               Consumer<AuthProvider>(
-                builder: (_, auth, __) {
+                builder: (_, auth, _) {
                   if (auth.isLoggedIn) {
                     return Card(
                       color: Colors.green.withAlpha(25),
@@ -145,9 +149,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               const SizedBox(height: 24),
 
               if (!provider.isPro) ...[
-                // Pro features
                 const Text(
-                  'Upgrade ke Pro',
+                  'Pilih Paket',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -155,58 +158,56 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 ),
                 const SizedBox(height: 16),
 
-                const _FeatureRow(
-                  icon: Icons.all_inclusive,
-                  text: 'Scan resi unlimited',
-                ),
-                const _FeatureRow(
-                  icon: Icons.cloud_sync,
-                  text: 'Sinkronisasi Cloud',
-                ),
-                const _FeatureRow(
-                  icon: Icons.download,
-                  text: 'Export CSV',
-                ),
-                const _FeatureRow(
-                  icon: Icons.backup,
-                  text: 'Backup & restore',
-                ),
-                const _FeatureRow(
-                  icon: Icons.devices,
-                  text: 'Akses multi perangkat',
-                ),
-                const _FeatureRow(
-                  icon: Icons.block,
-                  text: 'Tanpa iklan',
-                ),
-
-                const SizedBox(height: 24),
-
-                // Pricing Cards - Storage tiers
+                // Paket Basic
                 _PricingCard(
                   title: 'Basic',
-                  price: 'Rp 15.000',
+                  subtitle: '1.000 scan / bulan',
+                  price: 'Rp 29.000',
                   period: '/bulan',
-                  badge: '2 GB',
-                  onTap: () => _handlePurchase(provider),
+                  badge: '1rb scan',
+                  features: const [
+                    'Scan resi sampai 1.000/bulan',
+                    'Simpan foto scan',
+                    'Export CSV',
+                  ],
+                  onTap: () => _handlePurchase(StorageTier.basic),
                   isPrimary: false,
                 ),
                 const SizedBox(height: 12),
+
+                // Paket Pro
                 _PricingCard(
                   title: 'Pro',
-                  price: 'Rp 25.000',
+                  subtitle: '5.000 scan / bulan',
+                  price: 'Rp 99.000',
                   period: '/bulan',
-                  badge: '10 GB',
-                  onTap: () => _handlePurchase(provider),
+                  badge: '5rb scan',
+                  features: const [
+                    'Scan resi sampai 5.000/bulan',
+                    'Sinkronisasi Cloud',
+                    'Backup & restore',
+                    'Akses multi perangkat',
+                    'Tanpa iklan',
+                  ],
+                  onTap: () => _handlePurchase(StorageTier.pro),
                   isPrimary: true,
                 ),
                 const SizedBox(height: 12),
+
+                // Paket Team
                 _PricingCard(
-                  title: 'Unlimited',
-                  price: 'Rp 50.000',
+                  title: 'Team',
+                  subtitle: 'Unlimited scan',
+                  price: 'Rp 399.000',
                   period: '/bulan',
-                  badge: '∞',
-                  onTap: () => _handlePurchase(provider),
+                  badge: '∞ scan',
+                  features: const [
+                    'Scan resi tanpa batas',
+                    'Tim & manajemen anggota',
+                    'Sinkronisasi real-time',
+                    'Priority support',
+                  ],
+                  onTap: () => _handlePurchase(StorageTier.unlimited),
                   isPrimary: false,
                 ),
 
@@ -215,16 +216,37 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                   onPressed: () => provider.restorePurchase(),
                   child: const Text('Restore Purchase'),
                 ),
+              ] else ...[
+                // Info paket aktif
+                Card(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: AppTheme.primaryColor,
+                      child: Icon(
+                        provider.currentTier == StorageTier.unlimited
+                            ? Icons.groups
+                            : Icons.workspace_premium,
+                        color: Colors.white,
+                      ),
+                    ),
+                    title: Text('Paket ${provider.tierName} Aktif'),
+                    subtitle: Text(
+                      provider.scanLimit < 0
+                          ? 'Scan tanpa batas • ${provider.tierPrice}/bulan'
+                          : '${provider.scanLimitDisplay} scan/bulan • ${provider.tierPrice}/bulan',
+                    ),
+                  ),
+                ),
               ],
 
               // Debug toggle (remove in production)
               const SizedBox(height: 32),
               const Divider(),
               TextButton.icon(
-                onPressed: () => provider.toggleProDebug(),
+                onPressed: () => provider.toggleTierDebug(),
                 icon: const Icon(Icons.bug_report, size: 16),
                 label: Text(
-                  provider.isPro ? 'Debug: Set Free' : 'Debug: Set Pro',
+                  'Debug: ${provider.tierName} (${provider.scanLimitDisplay} scan)',
                   style: const TextStyle(fontSize: 12),
                 ),
               ),
@@ -237,7 +259,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   Widget _buildTeamDrawer(BuildContext context) {
     return Consumer<AuthProvider>(
-      builder: (_, auth, __) => Drawer(
+      builder: (_, auth, _) => Drawer(
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -293,27 +315,39 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     );
   }
 
-  void _handlePurchase(SubscriptionProvider provider) {
+  void _handlePurchase(StorageTier tier) {
     final auth = context.read<AuthProvider>();
     if (!auth.isLoggedIn) {
-      showLoginDialog(context, onSuccess: () => _showPurchaseDialog());
+      showLoginDialog(context, onSuccess: () => _showPurchaseDialog(tier));
       return;
     }
-    _showPurchaseDialog();
+    _showPurchaseDialog(tier);
   }
 
-  void _showPurchaseDialog() {
+  void _showPurchaseDialog(StorageTier tier) {
+    final tierName = tier == StorageTier.basic
+        ? 'Basic'
+        : tier == StorageTier.pro
+            ? 'Pro'
+            : 'Team';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Pembelian'),
-        content: const Text(
-          'Fitur In-App Purchase akan tersedia setelah setup di Google Play Console / App Store Connect.\n\nUntuk testing, gunakan tombol Debug di bawah.',
+        title: Text('Beli Paket $tierName'),
+        content: Text(
+          'Fitur In-App Purchase akan tersedia setelah setup di Google Play Console.\n\nUntuk testing, tekan "Beli Sekarang" untuk aktifkan paket.',
         ),
         actions: [
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () {
+              context.read<SubscriptionProvider>().purchaseTier(tier);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Beli Sekarang'),
           ),
         ],
       ),
@@ -385,39 +419,24 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   }
 }
 
-class _FeatureRow extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _FeatureRow({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Icon(icon, color: AppTheme.successColor, size: 22),
-          const SizedBox(width: 12),
-          Text(text, style: const TextStyle(fontSize: 15)),
-        ],
-      ),
-    );
-  }
-}
 
 class _PricingCard extends StatelessWidget {
   final String title;
+  final String? subtitle;
   final String price;
   final String period;
   final String? badge;
+  final List<String>? features;
   final VoidCallback onTap;
   final bool isPrimary;
 
   const _PricingCard({
     required this.title,
+    this.subtitle,
     required this.price,
     required this.period,
     this.badge,
+    this.features,
     required this.onTap,
     required this.isPrimary,
   });
@@ -437,74 +456,109 @@ class _PricingCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        if (badge != null) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppTheme.warningColor,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              badge!,
+                        Row(
+                          children: [
+                            Text(
+                              title,
                               style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
                                 fontWeight: FontWeight.bold,
+                                fontSize: 16,
                               ),
+                            ),
+                            if (badge != null) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.warningColor,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  badge!,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        if (subtitle != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            subtitle!,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
                             ),
                           ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          price,
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: isPrimary ? AppTheme.primaryColor : null,
-                          ),
-                        ),
-                        Text(
-                          period,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ],
+                  ),
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    size: 16,
+                    color: isPrimary ? AppTheme.primaryColor : Colors.grey,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    price,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isPrimary ? AppTheme.primaryColor : null,
                     ),
-                  ],
-                ),
+                  ),
+                  Text(
+                    period,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
               ),
-              Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: isPrimary ? AppTheme.primaryColor : Colors.grey,
-              ),
+              if (features != null && features!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+                ...features!.map((f) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle, size: 14, color: AppTheme.successColor),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          f,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+              ],
             ],
           ),
         ),
