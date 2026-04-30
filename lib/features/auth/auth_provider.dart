@@ -25,12 +25,13 @@ class AuthProvider extends ChangeNotifier {
   AuthProvider() {
     _checkAuth();
     if (!_supabase.isOffline) {
-      _supabase.authStateChanges.listen((state) {
+      _supabase.authStateChanges.listen((state) async {
         _isLoggedIn = state.session != null;
         if (_isLoggedIn) {
-          _checkAdminPro();
-          _loadTeam();
-          syncOnLogin();
+          notifyListeners();
+          await _checkAdminPro();
+          await _loadTeam();
+          await syncOnLogin();
         } else {
           _currentTeam = null;
         }
@@ -41,11 +42,11 @@ class AuthProvider extends ChangeNotifier {
 
   void _checkAuth() {
     _isLoggedIn = _supabase.currentUser != null;
+    notifyListeners();
     if (_isLoggedIn) {
       _checkAdminPro();
       _loadTeam();
     }
-    notifyListeners();
   }
 
   /// Auto-set Pro untuk admin email
@@ -204,14 +205,20 @@ class AuthProvider extends ChangeNotifier {
           ? await _supabase.fetchTeamOrders(teamId)
           : await _supabase.fetchOrders();
       for (final m in remote) {
-        final o = ScannedOrder(
-          resi: m['resi'] as String,
-          marketplace: m['marketplace'] as String,
-          scannedAt: DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int),
-          date: m['date'] as String,
-          photoPath: m['photo_url'] as String?,
-        );
-        try { await _db.insertOrder(o); } catch (_) {}
+        try {
+          final o = ScannedOrder(
+            resi: (m['resi'] ?? '') as String,
+            marketplace: (m['marketplace'] ?? '') as String,
+            scannedAt: m['scanned_at'] != null
+                ? DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int)
+                : DateTime.now(),
+            date: (m['date'] ?? DateTime.now().toIso8601String().substring(0, 10)) as String,
+            photoPath: m['photo_url'] as String?,
+          );
+          await _db.insertOrder(o);
+        } catch (e) {
+          debugPrint('Sync row error: $e');
+        }
       }
     } catch (e) {
       debugPrint('Sync error: $e');

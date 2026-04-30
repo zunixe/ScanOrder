@@ -21,6 +21,18 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   void initState() {
     super.initState();
     context.read<SubscriptionProvider>().loadStatus();
+    // Reload subscription status when auth changes (e.g. after login)
+    context.read<AuthProvider>().addListener(_onAuthChange);
+  }
+
+  void _onAuthChange() {
+    context.read<SubscriptionProvider>().loadStatus();
+  }
+
+  @override
+  void dispose() {
+    context.read<AuthProvider>().removeListener(_onAuthChange);
+    super.dispose();
   }
 
   @override
