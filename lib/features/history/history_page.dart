@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -122,15 +123,24 @@ class _HistoryPageState extends State<HistoryPage> {
                 decoration: InputDecoration(
                   hintText: 'Cari nomor resi...',
                   prefixIcon: const Icon(Icons.search, size: 20),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_searchController.text.isNotEmpty)
+                        IconButton(
                           icon: const Icon(Icons.clear, size: 20),
                           onPressed: () {
                             _searchController.clear();
                             provider.search('');
                           },
-                        )
-                      : null,
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.qr_code_scanner, size: 20),
+                        tooltip: 'Scan resi',
+                        onPressed: () => _scanToSearch(context, provider),
+                      ),
+                    ],
+                  ),
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   border: OutlineInputBorder(
@@ -390,6 +400,35 @@ class _OrderTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _scanToSearch(BuildContext ctx, HistoryProvider provider) async {
+    final result = await showDialog<String>(
+      context: ctx,
+      builder: (scanCtx) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Scan Resi'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(scanCtx),
+            ),
+          ),
+          body: MobileScanner(
+            onDetect: (capture) {
+              final barcode = capture.barcodes.firstOrNull;
+              if (barcode?.rawValue != null) {
+                Navigator.pop(scanCtx, barcode!.rawValue!);
+              }
+            },
+          ),
+        ),
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      _searchController.text = result;
+      provider.search(result);
+    }
   }
 
   Future<void> _downloadPhoto(BuildContext context, String photoPath) async {
