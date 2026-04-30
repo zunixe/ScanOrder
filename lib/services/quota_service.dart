@@ -7,7 +7,7 @@ enum StorageTier { free, basic, pro, unlimited }
 
 class QuotaService {
   // Scan limits per tier (per bulan)
-  static const int _freeScans = 10;
+  static const int _freeScans = 100;
   static const int _basicScans = 1000;
   static const int _proScans = 5000;
 
@@ -251,24 +251,25 @@ class QuotaService {
     await syncToCloud();
   }
 
-  Future<void> purchaseOrChangeTier(StorageTier newTier) async {
+  Future<void> purchaseOrChangeTier(StorageTier newTier, {bool carryOver = true}) async {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
     final oldTier = await getTier();
     final wasActive = await isSubscriptionActive();
     final oldAllowance = await getCycleAllowance();
     final oldUsed = await getUsedInCurrentCycle();
-    final oldRemaining = oldAllowance < 0 ? -1 : (oldAllowance - oldUsed).clamp(0, oldAllowance);
-
+    final oldRemaining = oldAllowance < 0 ? 0 : (oldAllowance - oldUsed).clamp(0, oldAllowance);
     final now = DateTime.now();
     final newBase = _defaultAllowanceForTier(newTier);
     int newAllowance;
 
     if (newBase < 0) {
-      newAllowance = -1;
+      newAllowance = -1; // Unlimited
+    } else if (carryOver && wasActive && newTier.index > oldTier.index && oldRemaining > 0) {
+      // Upgrade: carry-over sisa quota lama
+      newAllowance = newBase + oldRemaining;
     } else {
-      final carryOver = (wasActive && oldTier != StorageTier.free && oldRemaining > 0) ? oldRemaining : 0;
-      newAllowance = newBase + carryOver;
+      newAllowance = newBase; // Reset ke batas tier
     }
 
     await prefs.setString(_tierKey, newTier.name);
@@ -289,13 +290,25 @@ class QuotaService {
     if (cloud == null) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final tier = (cloud['tier'] as String?) ?? 'free';
+    final cloudTierStr = (cloud['tier'] as String?) ?? 'free';
+    final localTierStr = prefs.getString(_tierKey) ?? 'free';
+
+    // Konversi ke enum untuk perbandingan
+    StorageTier _parse(String s) {
+      return StorageTier.values.firstWhere((e) => e.name == s, orElse: () => StorageTier.free);
+    }
+    final cloudTier = _parse(cloudTierStr);
+    final localTier = _parse(localTierStr);
+
+    // Jangan downgrade tier lokal — hanya apply cloud jika tier cloud >= lokal
+    if (cloudTier.index < localTier.index) return;
+
     final activeFrom = cloud['active_from'] as String?;
     final activeUntil = cloud['active_until'] as String?;
     final allowance = (cloud['cycle_allowance'] as num?)?.toInt();
     final used = (cloud['cycle_used'] as num?)?.toInt();
 
-    await prefs.setString(_tierKey, tier);
+    await prefs.setString(_tierKey, cloudTierStr);
     if (activeFrom != null) {
       await prefs.setInt(_cycleStartKey, DateTime.parse(activeFrom).millisecondsSinceEpoch);
     }

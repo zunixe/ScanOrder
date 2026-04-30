@@ -329,6 +329,15 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                     ),
                   ),
                 ),
+                // Tombol upgrade untuk Basic dan Pro
+                if (provider.currentTier == StorageTier.basic || provider.currentTier == StorageTier.pro) ...[
+                  const SizedBox(height: 12),
+                  _UpgradeCard(
+                    currentTier: provider.currentTier,
+                    remainingScans: provider.remainingFree,
+                    onUpgrade: _handlePurchase,
+                  ),
+                ],
                 if (canManageTeam) ...[
                   const SizedBox(height: 12),
                   Container(
@@ -388,13 +397,23 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               // Debug toggle (remove in production)
               const SizedBox(height: 32),
               const Divider(),
-              TextButton.icon(
-                onPressed: () => provider.toggleTierDebug(),
-                icon: const Icon(Icons.bug_report, size: 16),
-                label: Text(
-                  'Debug: ${provider.tierName} (${provider.scanLimitDisplay} scan)',
-                  style: const TextStyle(fontSize: 12),
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => provider.toggleTierDebug(),
+                    icon: const Icon(Icons.bug_report, size: 16),
+                    label: Text(
+                      'Debug: ${provider.tierName}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => provider.resetQuotaDebug(),
+                    icon: const Icon(Icons.restart_alt, size: 16),
+                    label: const Text('Reset Quota', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
               ),
             ],
           ),
@@ -847,6 +866,86 @@ class _PricingCard extends StatelessWidget {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UpgradeCard extends StatelessWidget {
+  final StorageTier currentTier;
+  final int remainingScans;
+  final void Function(StorageTier) onUpgrade;
+
+  const _UpgradeCard({
+    required this.currentTier,
+    required this.remainingScans,
+    required this.onUpgrade,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isBasic = currentTier == StorageTier.basic;
+    final targetTier = isBasic ? StorageTier.pro : StorageTier.unlimited;
+    final targetName = isBasic ? 'Pro' : 'Team';
+    final targetPrice = isBasic ? 'Rp 99.000' : 'Rp 399.000';
+    final targetScans = isBasic ? '5.000 scan' : 'Unlimited';
+    final carryInfo = remainingScans > 0
+        ? ' + $remainingScans sisa scan terbawa'
+        : '';
+
+    return Card(
+      color: Colors.amber.withAlpha(20),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.amber.shade300, width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.arrow_circle_up_rounded, color: Colors.amber),
+                const SizedBox(width: 8),
+                Text(
+                  'Upgrade ke $targetName',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                const Spacer(),
+                Text(
+                  targetPrice,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.amber.shade800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '$targetScans/bulan$carryInfo',
+              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+            ),
+            if (remainingScans > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Sisa $remainingScans scan periode ini akan ditambahkan ke kuota baru.',
+                style: TextStyle(fontSize: 11, color: Colors.amber.shade800),
+              ),
+            ],
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade700),
+                onPressed: () => onUpgrade(targetTier),
+                icon: const Icon(Icons.upgrade),
+                label: Text('Upgrade ke $targetName'),
+              ),
+            ),
+          ],
         ),
       ),
     );

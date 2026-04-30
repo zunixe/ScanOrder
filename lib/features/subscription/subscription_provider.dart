@@ -55,7 +55,13 @@ class SubscriptionProvider extends ChangeNotifier {
   // For testing only — cycle through tiers
   Future<void> toggleTierDebug() async {
     final nextIndex = (currentTier.index + 1) % 4;
-    await _quota.setTier(StorageTier.values[nextIndex]);
+    await _quota.purchaseOrChangeTier(StorageTier.values[nextIndex], carryOver: false);
+    await loadStatus();
+  }
+
+  // Reset quota ke batas tier saat ini (debug)
+  Future<void> resetQuotaDebug() async {
+    await _quota.purchaseOrChangeTier(currentTier, carryOver: false);
     await loadStatus();
   }
 

@@ -17,8 +17,8 @@ class MarketplaceDetector {
       return 'Tokopedia';
     }
 
-    // JNE
-    if (RegExp(r'^(JN|TLJN|CGK|BDO|SUB|SRG)\d').hasMatch(upper) ||
+    // JNE — berbagai prefix layanan JNE
+    if (RegExp(r'^(JN|TLJN|CGK|BDO|SUB|SRG|MDN|UPG|MKS|YGY|PLM|BPN|BTH|CM|OK|MG|MP|CL|IN)\d').hasMatch(upper) ||
         upper.startsWith('JNE')) {
       return 'JNE';
     }
