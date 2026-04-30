@@ -359,29 +359,57 @@ class _OrderTile extends StatelessWidget {
   void _showPhotoDialog(BuildContext context, String photoPath) {
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AppBar(
-              title: const Text('Foto Scan'),
-              automaticallyImplyLeading: false,
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(ctx),
-                ),
-              ],
+      builder: (ctx) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Foto Scan'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(ctx),
             ),
-            Expanded(
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.download),
+                tooltip: 'Download',
+                onPressed: () => _downloadPhoto(ctx, photoPath),
+              ),
+            ],
+          ),
+          body: InteractiveViewer(
+            panEnabled: true,
+            boundaryMargin: const EdgeInsets.all(20),
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Center(
               child: Image.file(
                 File(photoPath),
                 fit: BoxFit.contain,
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _downloadPhoto(BuildContext context, String photoPath) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = 'scanorder_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final dest = File(p.join(dir.path, fileName));
+      await File(photoPath).copy(dest.path);
+
+      // Share file so user can save to gallery / downloads
+      await Share.shareXFiles(
+        [XFile(dest.path)],
+        text: 'Foto Scan Resi',
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal download: $e')),
+        );
+      }
+    }
   }
 }

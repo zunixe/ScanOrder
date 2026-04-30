@@ -14,6 +14,8 @@ class SubscriptionPage extends StatefulWidget {
 }
 
 class _SubscriptionPageState extends State<SubscriptionPage> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+
   @override
   void initState() {
     super.initState();
@@ -22,12 +24,22 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Langganan'),
-      ),
-      body: Consumer<SubscriptionProvider>(
-        builder: (_, provider, _) => SingleChildScrollView(
+    return Consumer<SubscriptionProvider>(
+      builder: (_, provider, __) => Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          title: const Text('Langganan'),
+          actions: [
+            if (provider.isPro)
+              IconButton(
+                icon: const Icon(Icons.menu),
+                tooltip: 'Menu Tim',
+                onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+              ),
+          ],
+        ),
+        endDrawer: provider.isPro ? _buildTeamDrawer(context) : null,
+        body: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
@@ -130,54 +142,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 },
               ),
 
-              // Team Management
-              Consumer<AuthProvider>(
-                builder: (_, auth, __) {
-                  if (!auth.isLoggedIn) return const SizedBox.shrink();
-                  if (auth.hasTeam) {
-                    return Card(
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          backgroundColor: Colors.blue,
-                          child: Icon(Icons.group, color: Colors.white),
-                        ),
-                        title: Text(auth.currentTeam!.name),
-                        subtitle: Text('Kode invite: ${auth.currentTeam!.inviteCode}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.copy),
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: auth.currentTeam!.inviteCode));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Kode invite disalin')),
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                  return Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          const Text('Tim', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          const SizedBox(height: 8),
-                          FilledButton(
-                            onPressed: () => _showCreateTeamDialog(context, auth),
-                            child: const Text('Buat Tim Baru'),
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            onPressed: () => _showJoinTeamDialog(context, auth),
-                            child: const Text('Gabung Tim'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-
               const SizedBox(height: 24),
 
               if (!provider.isPro) ...[
@@ -265,6 +229,64 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTeamDrawer(BuildContext context) {
+    return Consumer<AuthProvider>(
+      builder: (_, auth, __) => Drawer(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Tim',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (auth.hasTeam) ...[
+                  Card(
+                    child: ListTile(
+                      leading: const CircleAvatar(
+                        backgroundColor: Colors.blue,
+                        child: Icon(Icons.group, color: Colors.white),
+                      ),
+                      title: Text(auth.currentTeam!.name),
+                      subtitle: Text('Kode invite: ${auth.currentTeam!.inviteCode}'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.copy),
+                        onPressed: () {
+                          Clipboard.setData(
+                            ClipboardData(text: auth.currentTeam!.inviteCode),
+                          );
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Kode invite disalin')),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  FilledButton(
+                    onPressed: () => _showCreateTeamDialog(context, auth),
+                    child: const Text('Buat Tim Baru'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () => _showJoinTeamDialog(context, auth),
+                    child: const Text('Gabung Tim'),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       ),

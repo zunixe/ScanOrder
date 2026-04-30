@@ -3,6 +3,7 @@ import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
 import '../../models/team.dart';
+import '../../services/quota_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final _supabase = SupabaseService();
@@ -13,7 +14,6 @@ class AuthProvider extends ChangeNotifier {
 
   // Team state
   Team? _currentTeam;
-  bool _teamLoading = false;
 
   bool get isLoggedIn => _isLoggedIn;
   bool get isLoading => _isLoading;
@@ -27,6 +27,7 @@ class AuthProvider extends ChangeNotifier {
     _supabase.authStateChanges.listen((state) {
       _isLoggedIn = state.session != null;
       if (_isLoggedIn) {
+        _checkAdminPro();
         _loadTeam();
         syncOnLogin();
       } else {
@@ -38,19 +39,29 @@ class AuthProvider extends ChangeNotifier {
 
   void _checkAuth() {
     _isLoggedIn = _supabase.currentUser != null;
-    if (_isLoggedIn) _loadTeam();
+    if (_isLoggedIn) {
+      _checkAdminPro();
+      _loadTeam();
+    }
     notifyListeners();
   }
 
+  /// Auto-set Pro untuk admin email
+  Future<void> _checkAdminPro() async {
+    final user = _supabase.currentUser;
+    if (user?.email == 'zunixe@gmail.com') {
+      final quota = QuotaService();
+      await quota.setPro(true);
+      debugPrint('[AuthProvider] Admin Pro applied for ${user!.email}');
+    }
+  }
+
   Future<void> _loadTeam() async {
-    _teamLoading = true;
-    notifyListeners();
     try {
       _currentTeam = await _supabase.getMyTeam();
     } catch (e) {
       debugPrint('Load team error: $e');
     } finally {
-      _teamLoading = false;
       notifyListeners();
     }
   }
