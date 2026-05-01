@@ -23,6 +23,9 @@ class SupabaseService {
   bool _isOffline = false;
   bool get isOffline => _isOffline;
 
+  String get url => _supabaseUrl;
+  String get key => _supabaseKey;
+
   bool get _isConfigured =>
       !_supabaseUrl.contains('YOUR_PROJECT') && !_supabaseKey.contains('YOUR_ANON_KEY');
 
@@ -93,7 +96,7 @@ class SupabaseService {
     final user = currentUser;
     try {
       debugPrint('[Supabase] Inserting order: ${order.resi}');
-      await client.from('orders').insert({
+      await client.from('scans').insert({
         'device_id': deviceId ?? 'unknown',
         'user_id': user?.id,
         'resi': order.resi,
@@ -116,7 +119,7 @@ class SupabaseService {
     try {
       debugPrint('[Supabase] Deleting order: $resi');
       await client
-          .from('orders')
+          .from('scans')
           .delete()
           .eq('resi', resi)
           .eq('device_id', deviceId ?? 'unknown');
@@ -135,7 +138,7 @@ class SupabaseService {
     if (user == null) return [];
     try {
       final response = await client
-          .from('orders')
+          .from('scans')
           .select()
           .eq('user_id', user.id)
           .order('scanned_at', ascending: false);
@@ -369,7 +372,7 @@ class SupabaseService {
         'user_id': user?.id,
       };
       if (teamId != null) data['team_id'] = teamId;
-      await client.from('orders').insert(data);
+      await client.from('scans').insert(data);
       debugPrint('[Supabase] Insert success: ${order.resi}');
     } catch (e, st) {
       debugPrint('[Supabase] Insert error: $e');
@@ -382,7 +385,7 @@ class SupabaseService {
     if (client == null) return [];
     try {
       final response = await client
-          .from('orders')
+          .from('scans')
           .select()
           .eq('team_id', teamId)
           .order('scanned_at', ascending: false);
@@ -515,9 +518,9 @@ class SupabaseService {
     final client = _client;
     if (client == null) return;
     try {
-      await client.from('order_categories').upsert({
+      await client.from('scan_categories').upsert({
         'id': orderCategoryId,
-        'order_id': orderId,
+        'scan_id': orderId,
         'category_id': categoryId,
       });
     } catch (e) {
@@ -539,7 +542,7 @@ class SupabaseService {
       final catIds = catRes.map((c) => c['id'] as int).toList();
       if (catIds.isEmpty) return [];
       final res = await client
-          .from('order_categories')
+          .from('scan_categories')
           .select()
           .inFilter('category_id', catIds);
       return List<Map<String, dynamic>>.from(res);

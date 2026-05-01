@@ -234,6 +234,8 @@ class AuthProvider extends ChangeNotifier {
       final remote = teamId != null
           ? await _supabase.fetchTeamOrders(teamId)
           : await _supabase.fetchOrders();
+      debugPrint('[AuthProvider] syncOnLogin: userId=$userId, teamId=$teamId, remoteOrders=${remote.length}');
+      int synced = 0;
       for (final m in remote) {
         try {
           final o = ScannedOrder(
@@ -245,11 +247,17 @@ class AuthProvider extends ChangeNotifier {
             date: (m['date'] ?? DateTime.now().toIso8601String().substring(0, 10)) as String,
             photoPath: m['photo_url'] as String?,
           );
-          await _db.insertOrder(o, userId: userId);
+          final id = await _db.insertOrder(o, userId: userId);
+          if (id > 0) {
+            synced++;
+          } else {
+            debugPrint('[AuthProvider] syncOnLogin: insertOrder ignored (duplicate?) resi=${o.resi}');
+          }
         } catch (e) {
           debugPrint('Sync row error: $e');
         }
       }
+      debugPrint('[AuthProvider] syncOnLogin: synced=$synced orders');
 
       // Sync categories from cloud
       final remoteCats = await _supabase.fetchCategories();
@@ -274,7 +282,7 @@ class AuthProvider extends ChangeNotifier {
       for (final oc in remoteOC) {
         try {
           await _db.assignCategoryToOrder(
-            oc['order_id'] as int,
+            oc['scan_id'] as int,
             oc['category_id'] as int,
           );
         } catch (e) {

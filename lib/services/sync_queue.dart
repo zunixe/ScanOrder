@@ -197,7 +197,7 @@ class SyncQueue {
 
     final p = task.payload;
     try {
-      await client.from('orders').insert({
+      await client.from('scans').insert({
         'device_id': p['device_id'] ?? 'unknown',
         'user_id': p['user_id'],
         'resi': p['resi'],
@@ -238,7 +238,7 @@ class SyncQueue {
       if (client != null && p['resi'] != null) {
         try {
           await client
-              .from('orders')
+              .from('scans')
               .update({'photo_url': url})
               .eq('resi', p['resi'] as String);
         } catch (_) {}

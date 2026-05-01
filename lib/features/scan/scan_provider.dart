@@ -9,7 +9,7 @@ import '../../services/sync_queue.dart';
 import '../../services/sound_service.dart';
 import 'package:intl/intl.dart';
 
-enum ScanStatus { idle, success, duplicate, recentRepeat, quotaExceeded }
+enum ScanStatus { idle, success, duplicate, recentRepeat, quotaExceeded, noCategory }
 
 class ScanResult {
   final ScanStatus status;
@@ -43,6 +43,7 @@ class ScanProvider extends ChangeNotifier {
   // Category support (Team tier only)
   List<ScanCategory> categories = [];
   int? activeCategoryId;
+  Map<int, int> categoryCounts = {}; // categoryId -> order count
 
   bool get savePhoto => _savePhoto;
   String get quotaDisplay {
@@ -56,16 +57,25 @@ class ScanProvider extends ChangeNotifier {
 
   Future<void> loadCounts() async {
     final userId = SupabaseService().currentUser?.id;
+    // Migrate old non-user-scoped keys to user-scoped keys, then sync from cloud
+    if (userId != null) {
+      await _quota.migrateToUserScopedKeys();
+      await _quota.syncFromCloud();
+      // Sync local state back to cloud to fix any corrupted cloud data
+      await _quota.syncToCloud();
+    }
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    todayCount = await _db.getOrderCountByDate(today);
+    todayCount = await _db.getOrderCountByDate(today, userId: userId);
     totalCount = await _db.getTotalOrderCount(userId: userId);
     _savePhoto = await _quota.getSavePhoto();
     currentTier = await _quota.getTier();
     scanLimit = await _quota.getScanLimit();
     remainingScans = await _quota.getRemainingFreeScans();
+    debugPrint('[ScanProvider] loadCounts: userId=$userId, tier=$currentTier, scanLimit=$scanLimit, remaining=$remainingScans, todayCount=$todayCount, totalCount=$totalCount');
     // Load categories for Team tier
     if (currentTier == StorageTier.unlimited) {
       categories = await _db.getAllCategories(userId: userId);
+      categoryCounts = await _db.getCategoryCounts(userId: userId);
     }
     notifyListeners();
   }
@@ -73,6 +83,7 @@ class ScanProvider extends ChangeNotifier {
   Future<void> loadCategories() async {
     final userId = SupabaseService().currentUser?.id;
     categories = await _db.getAllCategories(userId: userId);
+    categoryCounts = await _db.getCategoryCounts(userId: userId);
     notifyListeners();
   }
 
@@ -128,6 +139,17 @@ class ScanProvider extends ChangeNotifier {
       final resi = rawCode.trim();
       if (resi.isEmpty) return null;
 
+      // Team tier: wajib pilih kategori dulu sebelum scan
+      if (currentTier == StorageTier.unlimited && activeCategoryId == null) {
+        lastResult = ScanResult(
+          status: ScanStatus.noCategory,
+          resi: resi,
+          marketplace: '',
+        );
+        notifyListeners();
+        return lastResult;
+      }
+
       // Filter: hanya terima nomor resi, tolak Order ID dll
       if (!MarketplaceDetector.isValidResi(resi)) return null;
 
@@ -145,18 +167,35 @@ class ScanProvider extends ChangeNotifier {
         return lastResult;
       }
 
-      // Check duplicate (indexed query — fast)
-      final existing = await _db.findByResi(resi);
-      if (existing != null) {
-        SoundService().playScanDuplicate();
-        lastResult = ScanResult(
-          status: ScanStatus.duplicate,
-          resi: resi,
-          marketplace: marketplace,
-          existingOrder: existing,
-        );
-        notifyListeners();
-        return lastResult;
+      // Check duplicate: scoped per category if active, else per user
+      final userId = SupabaseService().currentUser?.id;
+      if (activeCategoryId != null) {
+        // Dalam kategori: cek duplikat hanya di kategori itu
+        final alreadyInCategory = await _db.isOrderInCategory(resi, activeCategoryId!, userId: userId);
+        if (alreadyInCategory) {
+          SoundService().playScanDuplicate();
+          lastResult = ScanResult(
+            status: ScanStatus.duplicate,
+            resi: resi,
+            marketplace: marketplace,
+          );
+          notifyListeners();
+          return lastResult;
+        }
+      } else {
+        // Tanpa kategori: cek duplikat global per user
+        final existing = await _db.findByResi(resi, userId: userId);
+        if (existing != null) {
+          SoundService().playScanDuplicate();
+          lastResult = ScanResult(
+            status: ScanStatus.duplicate,
+            resi: resi,
+            marketplace: marketplace,
+            existingOrder: existing,
+          );
+          notifyListeners();
+          return lastResult;
+        }
       }
 
       // Check quota (skip jika user adalah anggota tim — tim = unlimited)
@@ -179,13 +218,22 @@ class ScanProvider extends ChangeNotifier {
         photoPath: photoPath,
       );
 
-      final userId = SupabaseService().currentUser?.id;
-      final orderId = await _db.insertOrder(order, userId: userId);
-      // Assign category if active (Team tier)
+      // Jika kategori aktif, cek apakah order sudah ada di tabel orders (boleh sama resi di kategori lain)
+      // Jika belum ada di orders, insert dulu; jika sudah ada, reuse order_id-nya
+      int orderId;
       if (activeCategoryId != null) {
+        final existingOrder = await _db.findByResi(resi, userId: userId);
+        if (existingOrder != null) {
+          orderId = existingOrder.id!;
+        } else {
+          orderId = await _db.insertOrder(order, userId: userId);
+        }
+        // Assign ke kategori aktif (UNIQUE order_id, category_id mencegah duplikat dalam kategori)
         final ocId = await _db.assignCategoryToOrder(orderId, activeCategoryId!);
         // Sync category assignment to Supabase
         Future.microtask(() => SupabaseService().assignOrderCategory(ocId, orderId, activeCategoryId!));
+      } else {
+        orderId = await _db.insertOrder(order, userId: userId);
       }
       // Jangan kurangi quota pribadi jika user anggota tim (tim = unlimited)
       if (teamId == null) await _quota.consumeScan();
@@ -215,20 +263,19 @@ class ScanProvider extends ChangeNotifier {
           'photo_url': photoPath, // local path, will be updated after upload
           'team_id': teamId,
         });
-        // Enqueue subscription sync (quota + storage update)
-        queue.enqueue(SyncTaskType.syncSubscription, {
-          'user_id': user.id,
-          'email': user.email,
-          'tier': 'pending', // will be resolved by queue from current state
-          'cycle_used': '0',
-          'cycle_allowance': '0',
-          'storage_used': '0',
-        });
+        // Note: subscription sync is handled by consumeScan() → syncToCloud()
+        // Do NOT enqueue syncSubscription here with placeholder data,
+        // it would overwrite the real tier in Supabase with 'pending'.
       }
 
       todayCount++;
       totalCount++;
       _recentScans[resi] = now;
+
+      // Update category count jika kategori aktif
+      if (activeCategoryId != null) {
+        categoryCounts[activeCategoryId!] = (categoryCounts[activeCategoryId!] ?? 0) + 1;
+      }
 
       SoundService().playScanSuccess();
       lastResult = ScanResult(

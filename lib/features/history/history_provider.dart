@@ -15,6 +15,7 @@ class HistoryProvider extends ChangeNotifier {
   bool isSearching = false;
   int? filterCategoryId;
   List<ScanCategory> categories = [];
+  Map<int, int> categoryCounts = {};
 
   String? _userId;
 
@@ -82,6 +83,7 @@ class HistoryProvider extends ChangeNotifier {
 
   Future<void> loadCategories() async {
     categories = await _db.getAllCategories(userId: _userId);
+    categoryCounts = await _db.getCategoryCounts(userId: _userId);
     notifyListeners();
   }
 
@@ -97,6 +99,7 @@ class HistoryProvider extends ChangeNotifier {
 
   Future<List<ScannedOrder>> getAllForExport() async {
     final orders = await _db.getAllOrders(userId: _userId);
+    debugPrint('[HistoryProvider] getAllForExport: userId=$_userId, orders=${orders.length}');
     // Attach categories to each order for export
     for (var i = 0; i < orders.length; i++) {
       if (orders[i].id != null) {

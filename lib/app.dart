@@ -73,6 +73,9 @@ class _MainShellState extends State<MainShell> {
     final userId = SupabaseService().currentUser?.id;
     context.read<HistoryProvider>().setUserId(userId);
     context.read<HistoryProvider>().refresh();
+    // Refresh scan counts & quota when user changes
+    context.read<ScanProvider>().loadCounts();
+    context.read<SubscriptionProvider>().loadStatus();
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
@@ -46,6 +47,14 @@ class _HistoryPageState extends State<HistoryPage> {
     final provider = context.read<HistoryProvider>();
     final orders = await provider.getAllForExport();
 
+    if (orders.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tidak ada data untuk di-export')),
+      );
+      return;
+    }
+
     final rows = <List<String>>[
       ['No', 'Resi', 'Marketplace', 'Kategori', 'Tanggal', 'Waktu'],
       ...orders.asMap().entries.map((e) {
@@ -74,8 +83,21 @@ class _HistoryPageState extends State<HistoryPage> {
     final provider = context.read<HistoryProvider>();
     final orders = await provider.getAllForExport();
 
+    if (orders.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tidak ada data untuk di-export')),
+      );
+      return;
+    }
+
     final excel = Excel.createExcel();
     final sheet = excel['ScanOrder'];
+
+    // Hapus default "Sheet1" yang kosong agar user langsung lihat sheet "ScanOrder"
+    if (excel.sheets.containsKey('Sheet1')) {
+      excel.delete('Sheet1');
+    }
 
     // Header
     final headers = ['No', 'Resi', 'Marketplace', 'Kategori', 'Tanggal', 'Waktu'];
@@ -171,7 +193,7 @@ class _HistoryPageState extends State<HistoryPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Riwayat Order'),
+        title: const Text('Riwayat Scan'),
         actions: [
           Consumer<SubscriptionProvider>(
             builder: (_, sub, __) {
@@ -222,7 +244,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   suffixIcon: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_searchController.text.isNotEmpty)
+                      if (_searchController.text.isNotEmpty || provider.isSearching)
                         IconButton(
                           icon: const Icon(Icons.clear, size: 20),
                           onPressed: () {
@@ -287,7 +309,7 @@ class _HistoryPageState extends State<HistoryPage> {
                     ),
                     const Spacer(),
                     Text(
-                      '${provider.orders.length} order',
+                      '${provider.orders.length} scan',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 13,
@@ -299,78 +321,124 @@ class _HistoryPageState extends State<HistoryPage> {
 
             const SizedBox(height: 8),
 
-            // Category filter chips (Team tier only)
-            Consumer<HistoryProvider>(
-              builder: (_, provider, _) {
-                if (provider.categories.isEmpty) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: ChoiceChip(
-                            label: const Text('Semua'),
-                            selected: provider.filterCategoryId == null,
-                            onSelected: (_) => provider.setFilterCategory(null),
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            // Team tier: kategori list dengan count
+            Consumer2<HistoryProvider, SubscriptionProvider>(
+              builder: (_, provider, sub, _) {
+                if (sub.currentTier != StorageTier.unlimited) return const SizedBox.shrink();
+                if (provider.filterCategoryId != null) return const SizedBox.shrink();
+                if (provider.isSearching) return const SizedBox.shrink();
+                // Tampilkan daftar kategori sebagai tampilan utama
+                return Expanded(
+                  child: provider.categories.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.folder_open, size: 64, color: Colors.grey[400]),
+                              const SizedBox(height: 12),
+                              Text('Belum ada kategori', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
+                            ],
                           ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          itemCount: provider.categories.length,
+                          itemBuilder: (_, i) {
+                            final cat = provider.categories[i];
+                            final count = provider.categoryCounts[cat.id] ?? 0;
+                            final catColor = _parseColor(cat.color);
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: catColor.withValues(alpha: 0.2),
+                                  child: Icon(Icons.folder, color: catColor),
+                                ),
+                                title: Text(cat.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: catColor.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '$count scan',
+                                    style: TextStyle(color: catColor, fontWeight: FontWeight.w600, fontSize: 13),
+                                  ),
+                                ),
+                                onTap: () => provider.setFilterCategory(cat.id),
+                              ),
+                            );
+                          },
                         ),
-                        ...provider.categories.map((cat) => Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: ChoiceChip(
-                            label: Text(cat.name),
-                            selected: provider.filterCategoryId == cat.id,
-                            onSelected: (_) => provider.setFilterCategory(cat.id),
-                            backgroundColor: _parseColor(cat.color).withValues(alpha: 0.15),
-                            selectedColor: _parseColor(cat.color).withValues(alpha: 0.3),
-                            visualDensity: VisualDensity.compact,
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        )),
-                      ],
-                    ),
-                  ),
                 );
               },
             ),
 
-            // Order list
-            Expanded(
-              child: provider.orders.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            provider.isSearching
-                                ? Icons.search_off
-                                : Icons.inbox_outlined,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            provider.isSearching
-                                ? 'Tidak ditemukan'
-                                : 'Belum ada order',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[500],
+            // Order list — Team tier hanya tampil jika kategori dipilih atau sedang search
+            Consumer2<HistoryProvider, SubscriptionProvider>(
+              builder: (_, provider, sub, _) {
+                final isTeam = sub.currentTier == StorageTier.unlimited;
+                // Team: sembunyikan order list jika di tampilan kategori
+                if (isTeam && provider.filterCategoryId == null && !provider.isSearching) {
+                  return const SizedBox.shrink();
+                }
+                return Expanded(
+                  child: Column(
+                    children: [
+                      // Back button untuk Team tier saat di kategori
+                      if (isTeam && provider.filterCategoryId != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: () => provider.setFilterCategory(null),
+                              icon: const Icon(Icons.arrow_back, size: 18),
+                              label: Text(
+                                provider.categories.where((c) => c.id == provider.filterCategoryId).firstOrNull?.name ?? 'Kembali',
+                                style: const TextStyle(fontWeight: FontWeight.w600),
+                              ),
                             ),
                           ),
-                        ],
+                        ),
+                      Expanded(
+                        child: provider.orders.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      provider.isSearching
+                                          ? Icons.search_off
+                                          : Icons.inbox_outlined,
+                                      size: 64,
+                                      color: Colors.grey[400],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      provider.isSearching
+                                          ? 'Tidak ditemukan'
+                                          : 'Belum ada scan',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.grey[500],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ListView.builder(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                itemCount: provider.orders.length,
+                                itemBuilder: (_, i) =>
+                                    _OrderTile(order: provider.orders[i], isLatest: i == 0),
+                              ),
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: provider.orders.length,
-                      itemBuilder: (_, i) =>
-                          _OrderTile(order: provider.orders[i], isLatest: i == 0),
-                    ),
+                    ],
+                  ),
+                );
+              },
             ),
           ],
         ),
@@ -460,7 +528,7 @@ class _OrderTile extends StatelessWidget {
         return await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Hapus Order?'),
+            title: const Text('Hapus Scan?'),
             content: Text('Hapus resi ${order.resi}?'),
             actions: [
               TextButton(
@@ -564,11 +632,22 @@ class _OrderTile extends StatelessWidget {
             ],
           ),
           onTap: () {
+            Clipboard.setData(ClipboardData(text: order.resi));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Resi ${order.resi} disalin'),
+                duration: const Duration(seconds: 1),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+          onLongPress: () {
             if (hasPhoto) {
               _showPhotoDialog(context, order.photoPath!);
+            } else {
+              _showPhotoOptions(context);
             }
           },
-          onLongPress: () => _showPhotoOptions(context),
         ),
       ),
     );

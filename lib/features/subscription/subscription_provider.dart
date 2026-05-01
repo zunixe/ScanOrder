@@ -1,10 +1,12 @@
 import 'package:flutter/foundation.dart';
+import '../../core/supabase/supabase_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/quota_service.dart';
 
 class SubscriptionProvider extends ChangeNotifier {
   final QuotaService _quota = QuotaService();
   final IapService _iap = IapService();
+  final SupabaseService _supabase = SupabaseService();
 
   bool isPro = false;
   int totalScanned = 0;
@@ -23,6 +25,7 @@ class SubscriptionProvider extends ChangeNotifier {
   int cycleUsed = 0;
   bool iapAvailable = false;
   bool isPurchasing = false;
+  bool _autoRestoring = false;
   String? purchaseError;
   List<String> notFoundProductIds = [];
   List<PackageInfo> packages = [];
@@ -41,8 +44,20 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   Future<void> loadStatus() async {
+    await _quota.migrateToUserScopedKeys();
     await _quota.syncFromCloud();
     isPro = await _quota.isPro();
+    // Auto-restore IAP jika user login tapi tier masih Free
+    // (misalnya setelah reinstall app, purchase Google Play belum ter-restore)
+    if (!isPro && _supabase.currentUser != null && !_autoRestoring) {
+      _autoRestoring = true;
+      try {
+        await _autoRestoreIapIfNeeded();
+        isPro = await _quota.isPro();
+      } finally {
+        _autoRestoring = false;
+      }
+    }
     totalScanned = await _quota.getTotalScanned();
     remainingFree = await _quota.getRemainingFreeScans();
     scanLimit = await _quota.getScanLimit();
@@ -58,6 +73,18 @@ class SubscriptionProvider extends ChangeNotifier {
     cycleAllowance = await _quota.getCycleAllowance();
     cycleUsed = await _quota.getUsedInCurrentCycle();
     notifyListeners();
+  }
+
+  Future<void> _autoRestoreIapIfNeeded() async {
+    try {
+      await initializeIap();
+      if (iapAvailable) {
+        debugPrint('[SubscriptionProvider] Auto-restoring IAP purchases...');
+        await _iap.restorePurchases();
+      }
+    } catch (e) {
+      debugPrint('[SubscriptionProvider] Auto-restore IAP error: $e');
+    }
   }
 
   Future<void> restorePurchase() async {

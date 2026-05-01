@@ -42,8 +42,8 @@ class _StatsPageState extends State<StatsPage> {
                 children: [
                   Expanded(
                     child: _SummaryCard(
-                      title: 'Total Order',
-                      value: '${provider.totalOrders}',
+                      title: 'Total Scan',
+                      value: '${provider.totalScans}',
                       icon: Icons.inventory_2_outlined,
                       color: AppTheme.primaryColor,
                     ),
@@ -51,7 +51,7 @@ class _StatsPageState extends State<StatsPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _SummaryCard(
-                      title: 'Hari ini',
+                      title: 'Scan Hari Ini',
                       value: '${provider.dailyStats[DateFormat('yyyy-MM-dd').format(DateTime.now())] ?? 0}',
                       icon: Icons.today,
                       color: AppTheme.successColor,
@@ -121,7 +121,7 @@ class _StatsPageState extends State<StatsPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'Order per Hari',
+                      'Scan per Hari',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -185,7 +185,7 @@ class _StatsPageState extends State<StatsPage> {
                     (e) => _MarketplaceRow(
                       name: e.key,
                       count: e.value,
-                      total: provider.totalOrders,
+                      total: provider.totalScans,
                     ),
                   ),
                 ],
@@ -205,7 +205,7 @@ class _StatsPageState extends State<StatsPage> {
                     (e) => _CategoryRow(
                       name: e.key,
                       count: e.value,
-                      total: provider.totalOrders,
+                      total: provider.totalScans,
                     ),
                   ),
                 ],
@@ -402,7 +402,7 @@ class _DailyBarChart extends StatelessWidget {
           touchTooltipData: LineTouchTooltipData(
             getTooltipItems: (touchedSpots) => touchedSpots
                 .map((s) => LineTooltipItem(
-                      '${s.y.toInt()} order',
+                      '${s.y.toInt()} scan',
                       const TextStyle(
                         color: Colors.white,
                         fontSize: 12,

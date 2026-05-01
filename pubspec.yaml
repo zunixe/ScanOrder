@@ -51,6 +51,8 @@ dependencies:
   google_sign_in: ^6.2.0
   image_picker: ^1.1.2
   wakelock_plus: ^1.5.2
+  mailer: ^6.2.1
+  http: ^1.2.2
 
 dev_dependencies:
   flutter_test:

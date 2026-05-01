@@ -103,15 +103,34 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        provider.cycleAllowance < 0
-                            ? 'Scan tanpa batas'
-                            : '${provider.cycleUsed} / ${provider.cycleAllowance} scan di periode aktif',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: provider.isPro ? Colors.white70 : null,
+                      if (provider.isPro && !provider.subscriptionActive) ...[
+                        Text(
+                          'Paket tidak aktif (expired)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: provider.isPro ? Colors.orangeAccent : Colors.red,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Perpanjang untuk scan lagi',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: provider.isPro ? Colors.white70 : Colors.grey[600],
+                          ),
+                        ),
+                      ] else ...[
+                        Text(
+                          provider.cycleAllowance < 0
+                              ? 'Scan tanpa batas'
+                              : '${provider.cycleUsed} / ${provider.cycleAllowance} scan di periode aktif',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: provider.isPro ? Colors.white70 : null,
+                          ),
+                        ),
+                      ],
                       if (provider.activeFrom != null && provider.activeUntil != null) ...[
                         const SizedBox(height: 4),
                         Text(
@@ -338,26 +357,6 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 }),
 
               ] else ...[
-                // Info paket aktif
-                Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: AppTheme.primaryColor,
-                      child: Icon(
-                        provider.currentTier == StorageTier.unlimited
-                            ? Icons.groups
-                            : Icons.workspace_premium,
-                        color: Colors.white,
-                      ),
-                    ),
-                    title: Text('Paket ${provider.tierName} Aktif'),
-                    subtitle: Text(
-                      provider.subscriptionActive
-                          ? 'Aktif ${provider.activeFrom != null ? _fmtDate(provider.activeFrom!) : '-'} s/d ${provider.activeUntil != null ? _fmtDate(provider.activeUntil!) : '-'}'
-                          : 'Paket tidak aktif (expired). Perpanjang untuk scan lagi.',
-                    ),
-                  ),
-                ),
                 // Tombol upgrade untuk Basic dan Pro
                 if (provider.currentTier == StorageTier.basic || provider.currentTier == StorageTier.pro) ...[
                   const SizedBox(height: 12),

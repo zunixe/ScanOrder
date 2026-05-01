@@ -26,6 +26,10 @@ class _ScanPageState extends State<ScanPage> {
   String? _lastScannedCode;
   Timer? _cooldownTimer;
   bool _onCooldown = false;
+  List<Offset> _barcodeCorners = const [];
+  Size _cameraSize = Size.zero;
+  Timer? _barcodeRectTimer;
+  bool _focusResiMode = true;
 
   @override
   void initState() {
@@ -45,6 +49,7 @@ class _ScanPageState extends State<ScanPage> {
     WakelockPlus.disable();
     _controller?.dispose();
     _cooldownTimer?.cancel();
+    _barcodeRectTimer?.cancel();
     super.dispose();
   }
 
@@ -57,6 +62,20 @@ class _ScanPageState extends State<ScanPage> {
     final code = barcode.rawValue!;
     if (code == _lastScannedCode) return;
 
+    if (_focusResiMode && !_isBarcodeInsideResiZone(barcode.corners, capture.size)) {
+      if (barcode.corners.isNotEmpty) {
+        setState(() {
+          _barcodeCorners = barcode.corners;
+          _cameraSize = capture.size;
+        });
+        _barcodeRectTimer?.cancel();
+        _barcodeRectTimer = Timer(const Duration(milliseconds: 600), () {
+          if (mounted) setState(() => _barcodeCorners = const []);
+        });
+      }
+      return;
+    }
+
     _lastScannedCode = code;
     _onCooldown = true;
     _cooldownTimer = Timer(const Duration(milliseconds: 1500), () {
@@ -64,7 +83,37 @@ class _ScanPageState extends State<ScanPage> {
       _lastScannedCode = null;
     });
 
+    // Update barcode corners overlay
+    if (barcode.corners.isNotEmpty) {
+      setState(() {
+        _barcodeCorners = barcode.corners;
+        _cameraSize = capture.size;
+      });
+      _barcodeRectTimer?.cancel();
+      _barcodeRectTimer = Timer(const Duration(milliseconds: 1200), () {
+        if (mounted) setState(() => _barcodeCorners = const []);
+      });
+    }
+
     _handleScan(code, capture);
+  }
+
+  bool _isBarcodeInsideResiZone(List<Offset> corners, Size cameraSize) {
+    if (corners.isEmpty || cameraSize == Size.zero) return false;
+
+    final center = corners.fold<Offset>(
+          Offset.zero,
+          (sum, point) => sum + point,
+        ) /
+        corners.length.toDouble();
+
+    final normalizedX = center.dx / cameraSize.width;
+    final normalizedY = center.dy / cameraSize.height;
+
+    return normalizedX >= 0.15 &&
+        normalizedX <= 0.85 &&
+        normalizedY >= 0.06 &&
+        normalizedY <= 0.36;
   }
 
   Future<void> _handleScan(String code, BarcodeCapture capture) async {
@@ -111,6 +160,12 @@ class _ScanPageState extends State<ScanPage> {
       case ScanStatus.quotaExceeded:
         Vibration.vibrate(duration: 300);
         if (mounted) _showQuotaDialog();
+        break;
+
+      case ScanStatus.noCategory:
+        Vibration.vibrate(duration: 200);
+        HapticFeedback.mediumImpact();
+        if (mounted) _showNoCategoryDialog();
         break;
 
       case ScanStatus.idle:
@@ -273,6 +328,64 @@ class _ScanPageState extends State<ScanPage> {
     );
   }
 
+  void _showNoCategoryDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Buat Kategori Dulu'),
+        content: const Text(
+          'Untuk mulai scan, buat kategori terlebih dahulu dengan tombol + di bawah.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showManualInputDialog() {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Input Manual No. Resi'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'No. Resi',
+            hintText: 'Masukkan nomor resi',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _submitManualResi(ctx, controller.text),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => _submitManualResi(ctx, controller.text),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _submitManualResi(BuildContext dialogContext, String value) async {
+    final code = value.trim().toUpperCase();
+    if (code.isEmpty) return;
+
+    Navigator.pop(dialogContext);
+    await _handleScan(code, const BarcodeCapture());
+  }
+
   String _formatTime(DateTime dt) {
     final h = dt.hour.toString().padLeft(2, '0');
     final m = dt.minute.toString().padLeft(2, '0');
@@ -390,14 +503,14 @@ class _ScanPageState extends State<ScanPage> {
             ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
               title: const Text('Hapus', style: TextStyle(color: Colors.red)),
-              subtitle: const Text('Order akan kembali ke kategori utama'),
+              subtitle: const Text('Semua scan dalam kategori ini akan ikut terhapus'),
               onTap: () async {
                 Navigator.pop(ctx);
                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (dCtx) => AlertDialog(
                     title: Text('Hapus "${cat.name}"?'),
-                    content: const Text('Order dalam kategori ini akan kembali ke kategori utama (Semua).'),
+                    content: const Text('Semua scan dalam kategori ini juga akan dihapus. Tindakan ini tidak bisa dibatalkan.'),
                     actions: [
                       TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
                       TextButton(
@@ -500,7 +613,7 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                         Text(
-                          'Hari ini: ${provider.todayCount} order',
+                          'Hari ini: ${provider.todayCount} scan',
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 13,
@@ -540,6 +653,17 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                         const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () {
+                            setState(() => _focusResiMode = !_focusResiMode);
+                          },
+                          icon: Icon(
+                            _focusResiMode ? Icons.center_focus_strong : Icons.center_focus_weak,
+                            color: _focusResiMode ? Colors.lightGreenAccent : Colors.white70,
+                          ),
+                          tooltip: _focusResiMode ? 'Fokus Resi: ON' : 'Fokus Resi: OFF',
+                        ),
+                        const SizedBox(width: 4),
                         // Photo save toggle
                         Consumer<ScanProvider>(
                           builder: (_, provider, _) => IconButton(
@@ -570,75 +694,30 @@ class _ScanPageState extends State<ScanPage> {
             ),
           ),
 
-          // Category chips (Team tier only)
+          // Category chips (Team tier only) — sejajar dengan FAB input manual di kiri bawah
           Positioned(
-            top: MediaQuery.of(context).padding.top + 80,
-            left: 0,
-            right: 0,
+            left: 12,
+            right: 70,
+            bottom: MediaQuery.of(context).padding.bottom + 20,
             child: Consumer<ScanProvider>(
               builder: (_, provider, _) {
                 if (provider.currentTier != StorageTier.unlimited) {
                   return const SizedBox.shrink();
                 }
                 return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.5),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        // "Semua" chip
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: GestureDetector(
-                            onTap: () => provider.setActiveCategory(null),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                              decoration: BoxDecoration(
-                                color: provider.activeCategoryId == null
-                                    ? Colors.white.withValues(alpha: 0.9)
-                                    : Colors.white.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: provider.activeCategoryId == null
-                                      ? Colors.white
-                                      : Colors.white.withValues(alpha: 0.4),
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Text(
-                                'Semua',
-                                style: TextStyle(
-                                  color: provider.activeCategoryId == null
-                                      ? Colors.black87
-                                      : Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: provider.activeCategoryId == null
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        // Category chips
+                        // Category chips — tap to select, tap again to deselect
                         ...provider.categories.map((cat) {
                           final catColor = _parseColor(cat.color);
                           final isActive = provider.activeCategoryId == cat.id;
                           return Padding(
                             padding: const EdgeInsets.only(right: 6),
                             child: GestureDetector(
-                              onTap: () => provider.setActiveCategory(cat.id),
+                              onTap: () => provider.setActiveCategory(isActive ? null : cat.id),
                               onLongPress: () => _showCategoryOptions(context, cat),
                               child: AnimatedContainer(
                                 duration: const Duration(milliseconds: 200),
@@ -668,7 +747,7 @@ class _ScanPageState extends State<ScanPage> {
                                     ),
                                     const SizedBox(width: 6),
                                     Text(
-                                      cat.name,
+                                      '${cat.name} (${provider.categoryCounts[cat.id] ?? 0})',
                                       style: TextStyle(
                                         color: isActive ? Colors.white : Colors.white,
                                         fontSize: 12,
@@ -716,33 +795,197 @@ class _ScanPageState extends State<ScanPage> {
             ),
           ),
 
-          // Scan area indicator
-          Center(
-            child: Container(
-              width: 280,
-              height: 160,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.white.withValues(alpha: 0.6), width: 2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.qr_code_scanner, color: Colors.white70, size: 32),
-                  SizedBox(height: 8),
-                  Text(
-                    'Arahkan ke barcode resi',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
+          // Scan area indicator / barcode tracker
+          _BarcodeTracker(
+            corners: _barcodeCorners,
+            cameraSize: _cameraSize,
+            focusResiMode: _focusResiMode,
+          ),
+
+          Positioned(
+            right: 18,
+            bottom: MediaQuery.of(context).padding.bottom + 18,
+            child: FloatingActionButton.small(
+              heroTag: 'manual_resi_input',
+              onPressed: _showManualInputDialog,
+              backgroundColor: AppTheme.primaryColor,
+              foregroundColor: Colors.white,
+              tooltip: 'Input manual no. resi',
+              child: const Icon(Icons.keyboard),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _BarcodeTracker extends StatelessWidget {
+  final List<Offset> corners;
+  final Size cameraSize;
+  final bool focusResiMode;
+
+  const _BarcodeTracker({
+    required this.corners,
+    required this.cameraSize,
+    required this.focusResiMode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (corners.isEmpty || cameraSize == Size.zero) {
+      // Default scan area box
+      return LayoutBuilder(
+        builder: (_, constraints) {
+          final width = constraints.maxWidth;
+          final height = constraints.maxHeight;
+          final boxWidth = focusResiMode ? width * 0.7 : 280.0;
+          final boxHeight = focusResiMode ? 120.0 : 160.0;
+          final top = focusResiMode ? height * 0.18 : (height - boxHeight) / 2;
+          final left = (width - boxWidth) / 2;
+
+          return Stack(
+            children: [
+              Positioned(
+                left: left,
+                top: top,
+                child: Container(
+                  width: boxWidth,
+                  height: boxHeight,
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: focusResiMode
+                          ? Colors.lightGreenAccent.withValues(alpha: 0.85)
+                          : Colors.white.withValues(alpha: 0.6),
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        focusResiMode ? Icons.center_focus_strong : Icons.qr_code_scanner,
+                        color: focusResiMode ? Colors.lightGreenAccent : Colors.white70,
+                        size: 32,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        focusResiMode ? 'Fokus ke barcode No. Resi' : 'Arahkan ke barcode resi',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: focusResiMode ? Colors.lightGreenAccent : Colors.white70,
+                          fontSize: 13,
+                          fontWeight: focusResiMode ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    return Center(
+      child: AspectRatio(
+        aspectRatio: cameraSize.width / cameraSize.height,
+        child: LayoutBuilder(
+          builder: (_, constraints) {
+            final scaleX = constraints.maxWidth / cameraSize.width;
+            final scaleY = constraints.maxHeight / cameraSize.height;
+
+            final scaledCorners = corners.map((c) => Offset(c.dx * scaleX, c.dy * scaleY)).toList();
+
+            return CustomPaint(
+              size: Size(constraints.maxWidth, constraints.maxHeight),
+              painter: _BarcodeOverlayPainter(corners: scaledCorners),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _BarcodeOverlayPainter extends CustomPainter {
+  final List<Offset> corners;
+
+  _BarcodeOverlayPainter({required this.corners});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (corners.length < 4) return;
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFF00E676).withValues(alpha: 0.12)
+      ..style = PaintingStyle.fill;
+
+    // Fill area
+    final path = Path()
+      ..moveTo(corners[0].dx, corners[0].dy)
+      ..lineTo(corners[1].dx, corners[1].dy)
+      ..lineTo(corners[2].dx, corners[2].dy)
+      ..lineTo(corners[3].dx, corners[3].dy)
+      ..close();
+    canvas.drawPath(path, fillPaint);
+
+    // Corner brackets (YOLO style)
+    final cornerLen = 20.0;
+    final cornerPaint = Paint()
+      ..color = const Color(0xFF00E676)
+      ..strokeWidth = 4
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    // Top-left
+    canvas.drawLine(corners[0], Offset(corners[0].dx + cornerLen, corners[0].dy), cornerPaint);
+    canvas.drawLine(corners[0], Offset(corners[0].dx, corners[0].dy + cornerLen), cornerPaint);
+
+    // Top-right
+    canvas.drawLine(corners[1], Offset(corners[1].dx - cornerLen, corners[1].dy), cornerPaint);
+    canvas.drawLine(corners[1], Offset(corners[1].dx, corners[1].dy + cornerLen), cornerPaint);
+
+    // Bottom-right
+    canvas.drawLine(corners[2], Offset(corners[2].dx - cornerLen, corners[2].dy), cornerPaint);
+    canvas.drawLine(corners[2], Offset(corners[2].dx, corners[2].dy - cornerLen), cornerPaint);
+
+    // Bottom-left
+    canvas.drawLine(corners[3], Offset(corners[3].dx + cornerLen, corners[3].dy), cornerPaint);
+    canvas.drawLine(corners[3], Offset(corners[3].dx, corners[3].dy - cornerLen), cornerPaint);
+
+    // Dashed border connecting corners
+    final dashPaint = Paint()
+      ..color = const Color(0xFF00E676).withValues(alpha: 0.5)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    for (int i = 0; i < 4; i++) {
+      final start = corners[i];
+      final end = corners[(i + 1) % 4];
+      _drawDashedLine(canvas, start, end, dashPaint);
+    }
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
+    const dashLen = 6.0;
+    const gapLen = 4.0;
+    final total = (end - start).distance;
+    final dx = (end.dx - start.dx) / total;
+    final dy = (end.dy - start.dy) / total;
+
+    double dist = 0;
+    while (dist < total) {
+      final s = Offset(start.dx + dx * dist, start.dy + dy * dist);
+      final eDist = (dist + dashLen).clamp(0, total);
+      final e = Offset(start.dx + dx * eDist, start.dy + dy * eDist);
+      canvas.drawLine(s, e, paint);
+      dist += dashLen + gapLen;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BarcodeOverlayPainter old) => old.corners != corners;
 }

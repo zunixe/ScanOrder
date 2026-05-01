@@ -73,7 +73,49 @@ class QuotaService {
   static const String _cycleEndKey = 'subscription_cycle_end_ms';
   static const String _cycleAllowanceKey = 'subscription_cycle_allowance';
   static const String _cycleUsedKey = 'subscription_cycle_used';
+  static const String _savePhotoKey = 'save_photo';
   static const int _cycleDays = 30;
+
+  /// Prefix key dengan user_id agar data quota terpisah per user
+  String _userKey(String baseKey) {
+    final userId = _supabase.currentUser?.id ?? 'anon';
+    return '${baseKey}_$userId';
+  }
+
+  /// Migrasi data dari key lama (tanpa user_id) ke key baru (dengan suffix user_id).
+  /// Dipanggil sekali saat user login setelah upgrade ke user-scoped keys.
+  Future<void> migrateToUserScopedKeys() async {
+    final userId = _supabase.currentUser?.id;
+    if (userId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final migratedKey = '_migrated_$userId';
+    if (prefs.getBool(migratedKey) == true) return; // sudah pernah migrasi
+
+    // Copy semua key lama ke key baru (hanya jika key baru belum ada)
+    final keysToMigrate = [
+      _tierKey, _cycleStartKey, _cycleEndKey,
+      _cycleAllowanceKey, _cycleUsedKey, _savePhotoKey,
+    ];
+    for (final key in keysToMigrate) {
+      final newKey = _userKey(key);
+      if (prefs.containsKey(newKey)) continue; // sudah ada, skip
+      if (!prefs.containsKey(key)) continue;   // key lama tidak ada, skip
+
+      final value = prefs.get(key);
+      if (value is int) {
+        await prefs.setInt(newKey, value);
+      } else if (value is String) {
+        await prefs.setString(newKey, value);
+      } else if (value is bool) {
+        await prefs.setBool(newKey, value);
+      } else if (value is double) {
+        await prefs.setDouble(newKey, value);
+      }
+    }
+
+    await prefs.setBool(migratedKey, true);
+  }
 
   int _defaultAllowanceForTier(StorageTier tier) {
     // Coba ambil dari packages dulu
@@ -118,17 +160,19 @@ class QuotaService {
 
   Future<void> _ensureCycleInitialized() async {
     final prefs = await SharedPreferences.getInstance();
-    final startMs = prefs.getInt(_cycleStartKey);
-    final endMs = prefs.getInt(_cycleEndKey);
-    final allowance = prefs.getInt(_cycleAllowanceKey);
-    if (startMs != null && endMs != null && allowance != null) return;
+    final startMs = prefs.getInt(_userKey(_cycleStartKey));
+    final endMs = prefs.getInt(_userKey(_cycleEndKey));
+    final allowance = prefs.getInt(_userKey(_cycleAllowanceKey));
+    // Re-init jika data belum lengkap ATAU allowance=0 (korup dari sync pending)
+    // allowance=-1 (unlimited) dan >0 (valid) dianggap sudah ter-init
+    if (startMs != null && endMs != null && allowance != null && allowance != 0) return;
 
     final now = DateTime.now();
     final tier = await getTier();
-    await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
-    await prefs.setInt(_cycleEndKey, now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
-    await prefs.setInt(_cycleAllowanceKey, _defaultAllowanceForTier(tier));
-    await prefs.setInt(_cycleUsedKey, 0);
+    await prefs.setInt(_userKey(_cycleStartKey), now.millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleEndKey), now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleAllowanceKey), _defaultAllowanceForTier(tier));
+    await prefs.setInt(_userKey(_cycleUsedKey), 0);
   }
 
   Future<void> _autoRollFreeCycleIfNeeded() async {
@@ -137,14 +181,14 @@ class QuotaService {
     if (tier != StorageTier.free) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final endMs = prefs.getInt(_cycleEndKey) ?? 0;
+    final endMs = prefs.getInt(_userKey(_cycleEndKey)) ?? 0;
     if (DateTime.now().millisecondsSinceEpoch <= endMs) return;
 
     final now = DateTime.now();
-    await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
-    await prefs.setInt(_cycleEndKey, now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
-    await prefs.setInt(_cycleAllowanceKey, _freeScans);
-    await prefs.setInt(_cycleUsedKey, 0);
+    await prefs.setInt(_userKey(_cycleStartKey), now.millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleEndKey), now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleAllowanceKey), _freeScans);
+    await prefs.setInt(_userKey(_cycleUsedKey), 0);
   }
 
   Future<bool> canScan() async {
@@ -162,8 +206,8 @@ class QuotaService {
   Future<void> consumeScan() async {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final used = prefs.getInt(_cycleUsedKey) ?? 0;
-    await prefs.setInt(_cycleUsedKey, used + 1);
+    final used = prefs.getInt(_userKey(_cycleUsedKey)) ?? 0;
+    await prefs.setInt(_userKey(_cycleUsedKey), used + 1);
     await syncToCloud();
   }
 
@@ -179,7 +223,7 @@ class QuotaService {
   Future<DateTime?> getActiveFrom() async {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final startMs = prefs.getInt(_cycleStartKey);
+    final startMs = prefs.getInt(_userKey(_cycleStartKey));
     if (startMs == null) return null;
     return DateTime.fromMillisecondsSinceEpoch(startMs);
   }
@@ -187,7 +231,7 @@ class QuotaService {
   Future<DateTime?> getActiveUntil() async {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final endMs = prefs.getInt(_cycleEndKey);
+    final endMs = prefs.getInt(_userKey(_cycleEndKey));
     if (endMs == null) return null;
     return DateTime.fromMillisecondsSinceEpoch(endMs);
   }
@@ -195,37 +239,45 @@ class QuotaService {
   Future<int> getCycleAllowance() async {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_cycleAllowanceKey) ?? _freeScans;
+    return prefs.getInt(_userKey(_cycleAllowanceKey)) ?? _freeScans;
   }
 
   Future<int> getUsedInCurrentCycle() async {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_cycleUsedKey) ?? 0;
+    return prefs.getInt(_userKey(_cycleUsedKey)) ?? 0;
   }
 
   Future<bool> canStorePhoto() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('save_photo') ?? true;
+    return prefs.getBool(_userKey(_savePhotoKey)) ?? true;
   }
 
   Future<bool> getSavePhoto() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('save_photo') ?? true;
+    return prefs.getBool(_userKey(_savePhotoKey)) ?? true;
   }
 
   Future<void> setSavePhoto(bool value) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('save_photo', value);
+    await prefs.setBool(_userKey(_savePhotoKey), value);
   }
 
   Future<StorageTier> getTier() async {
     final prefs = await SharedPreferences.getInstance();
-    final tier = prefs.getString(_tierKey) ?? 'free';
+    final tier = prefs.getString(_userKey(_tierKey)) ?? 'free';
     switch (tier) {
       case 'basic': return StorageTier.basic;
       case 'pro': return StorageTier.pro;
       case 'unlimited': return StorageTier.unlimited;
+      case 'pending':
+        // 'pending' bukan tier valid — bersihkan semua data cycle yang korup
+        await prefs.remove(_userKey(_tierKey));
+        await prefs.remove(_userKey(_cycleAllowanceKey));
+        await prefs.remove(_userKey(_cycleUsedKey));
+        await prefs.remove(_userKey(_cycleStartKey));
+        await prefs.remove(_userKey(_cycleEndKey));
+        return StorageTier.free;
       default: return StorageTier.free;
     }
   }
@@ -332,7 +384,7 @@ class QuotaService {
 
   Future<void> setTier(StorageTier tier) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tierKey, tier.name);
+    await prefs.setString(_userKey(_tierKey), tier.name);
     await _ensureCycleInitialized();
     await syncToCloud();
   }
@@ -350,7 +402,7 @@ class QuotaService {
     int newAllowance;
 
     // Hitung sisa hari periode lama
-    final oldEndMs = prefs.getInt(_cycleEndKey) ?? 0;
+    final oldEndMs = prefs.getInt(_userKey(_cycleEndKey)) ?? 0;
     final remainingDays = oldEndMs > now.millisecondsSinceEpoch
         ? ((oldEndMs - now.millisecondsSinceEpoch) / (1000 * 60 * 60 * 24)).ceil()
         : 0;
@@ -369,11 +421,11 @@ class QuotaService {
         ? remainingDays
         : 0;
 
-    await prefs.setString(_tierKey, newTier.name);
-    await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
-    await prefs.setInt(_cycleEndKey, now.add(Duration(days: _cycleDays + extraDays)).millisecondsSinceEpoch);
-    await prefs.setInt(_cycleAllowanceKey, newAllowance);
-    await prefs.setInt(_cycleUsedKey, 0);
+    await prefs.setString(_userKey(_tierKey), newTier.name);
+    await prefs.setInt(_userKey(_cycleStartKey), now.millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleEndKey), now.add(Duration(days: _cycleDays + extraDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleAllowanceKey), newAllowance);
+    await prefs.setInt(_userKey(_cycleUsedKey), 0);
     await syncToCloud();
   }
 
@@ -403,13 +455,30 @@ class QuotaService {
         // Fetch lagi sekarang sudah ada
         return syncFromCloud();
       }
+      debugPrint('[QuotaService] No subscription found in cloud for user ${user.id}');
+      // Cloud tidak punya data → pastikan cycle lokal ter-init dengan benar
+      await _ensureCycleInitialized();
       return;
     }
-    if (cloud == null) return;
+    if (cloud == null) {
+      debugPrint('[QuotaService] No subscription in cloud, initializing local cycle');
+      await _ensureCycleInitialized();
+      return;
+    }
+
+    debugPrint('[QuotaService] Cloud subscription: tier=${cloud['tier']}, allowance=${cloud['cycle_allowance']}, used=${cloud['cycle_used']}');
 
     final prefs = await SharedPreferences.getInstance();
     final cloudTierStr = (cloud['tier'] as String?) ?? 'free';
-    final localTierStr = prefs.getString(_tierKey) ?? 'free';
+
+    // Abaikan tier 'pending' — subscription belum aktif, jangan timpa data lokal
+    if (cloudTierStr == 'pending') {
+      debugPrint('[QuotaService] Cloud tier is pending, skipping sync');
+      await _ensureCycleInitialized();
+      return;
+    }
+
+    final localTierStr = prefs.getString(_userKey(_tierKey)) ?? 'free';
 
     // Konversi ke enum untuk perbandingan
     StorageTier parse(String s) {
@@ -426,18 +495,18 @@ class QuotaService {
     final allowance = (cloud['cycle_allowance'] as num?)?.toInt();
     final used = (cloud['cycle_used'] as num?)?.toInt();
 
-    await prefs.setString(_tierKey, cloudTierStr);
+    await prefs.setString(_userKey(_tierKey), cloudTierStr);
     if (activeFrom != null) {
-      await prefs.setInt(_cycleStartKey, DateTime.parse(activeFrom).millisecondsSinceEpoch);
+      await prefs.setInt(_userKey(_cycleStartKey), DateTime.parse(activeFrom).millisecondsSinceEpoch);
     }
     if (activeUntil != null) {
-      await prefs.setInt(_cycleEndKey, DateTime.parse(activeUntil).millisecondsSinceEpoch);
+      await prefs.setInt(_userKey(_cycleEndKey), DateTime.parse(activeUntil).millisecondsSinceEpoch);
     }
     if (allowance != null) {
-      await prefs.setInt(_cycleAllowanceKey, allowance);
+      await prefs.setInt(_userKey(_cycleAllowanceKey), allowance);
     }
     if (used != null) {
-      await prefs.setInt(_cycleUsedKey, used);
+      await prefs.setInt(_userKey(_cycleUsedKey), used);
     }
   }
 
@@ -446,11 +515,11 @@ class QuotaService {
     await _ensureCycleInitialized();
     final prefs = await SharedPreferences.getInstance();
 
-    final tier = prefs.getString(_tierKey) ?? 'free';
-    final startMs = prefs.getInt(_cycleStartKey);
-    final endMs = prefs.getInt(_cycleEndKey);
-    final allowance = prefs.getInt(_cycleAllowanceKey) ?? _freeScans;
-    final used = prefs.getInt(_cycleUsedKey) ?? 0;
+    final tier = prefs.getString(_userKey(_tierKey)) ?? 'free';
+    final startMs = prefs.getInt(_userKey(_cycleStartKey));
+    final endMs = prefs.getInt(_userKey(_cycleEndKey));
+    final allowance = prefs.getInt(_userKey(_cycleAllowanceKey)) ?? _freeScans;
+    final used = prefs.getInt(_userKey(_cycleUsedKey)) ?? 0;
     final storageUsed = await getUsedBytes();
 
     // Enqueue via SyncQueue for reliable delivery with retry

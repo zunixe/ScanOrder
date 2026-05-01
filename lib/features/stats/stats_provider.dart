@@ -12,7 +12,7 @@ class StatsProvider extends ChangeNotifier {
   Map<String, int> dailyStats = {};
   Map<String, int> marketplaceStats = {};
   Map<String, int> categoryStats = {};
-  int totalOrders = 0;
+  int totalScans = 0;
   int periodDays = 7;
 
   // Storage stats
@@ -22,9 +22,9 @@ class StatsProvider extends ChangeNotifier {
 
   Future<void> loadStats() async {
     final userId = SupabaseService().currentUser?.id;
-    dailyStats = await _db.getDailyStats(periodDays);
-    marketplaceStats = await _db.getMarketplaceStats();
-    totalOrders = await _db.getTotalOrderCount(userId: userId);
+    dailyStats = await _db.getDailyStats(periodDays, userId: userId);
+    marketplaceStats = await _db.getMarketplaceStats(userId: userId);
+    totalScans = await _db.getTotalOrderCount(userId: userId);
     categoryStats = await _db.getCategoryStats(userId: userId);
     await _loadStorageStats();
     notifyListeners();

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../../core/theme.dart';
+import '../../core/supabase/supabase_service.dart';
 
 class ContactPage extends StatefulWidget {
   const ContactPage({super.key});
@@ -28,24 +31,56 @@ class _ContactPageState extends State<ContactPage> {
 
     setState(() => _isSending = true);
 
-    // Simulate sending message
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      final supabaseUrl = SupabaseService().url;
+      final anonKey = SupabaseService().key;
+      final response = await http.post(
+        Uri.parse('$supabaseUrl/functions/v1/send-contact'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $anonKey',
+        },
+        body: jsonEncode({
+          'name': _nameController.text.trim(),
+          'email': _emailController.text.trim(),
+          'message': _messageController.text.trim(),
+        }),
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() => _isSending = false);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Pesan berhasil dikirim!'),
-        backgroundColor: AppTheme.successColor,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-
-    _nameController.clear();
-    _emailController.clear();
-    _messageController.clear();
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Pesan berhasil dikirim!'),
+            backgroundColor: AppTheme.successColor,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _nameController.clear();
+        _emailController.clear();
+        _messageController.clear();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Gagal mengirim pesan. Coba lagi nanti.'),
+            backgroundColor: AppTheme.dangerColor,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Tidak ada koneksi internet.'),
+          backgroundColor: AppTheme.dangerColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
   }
 
   @override
