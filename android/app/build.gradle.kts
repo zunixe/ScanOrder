@@ -30,8 +30,8 @@ android {
 
     defaultConfig {
         applicationId = "com.scanorder.scanorder"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 21
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

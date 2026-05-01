@@ -1,11 +1,9 @@
-import "@supabase/functions-js/edge-runtime.d.ts"
-import { SmtpClient } from "https://deno.land/x/smtp@v0.7.0/mod.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const SMTP_HOST = Deno.env.get("SMTP_HOST") ?? "smtp.gmail.com"
-const SMTP_PORT = Number(Deno.env.get("SMTP_PORT") ?? 587)
-const SMTP_USER = Deno.env.get("SMTP_USER") ?? ""
-const SMTP_PASS = Deno.env.get("SMTP_PASS") ?? ""
+const APPS_SCRIPT_URL = Deno.env.get("APPS_SCRIPT_URL") ?? ""
 const DEST_EMAIL = Deno.env.get("DEST_EMAIL") ?? "zunixe@gmail.com"
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? ""
+const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -28,38 +26,106 @@ Deno.serve(async (req) => {
       })
     }
 
-    const client = new SmtpClient()
-    await client.connectTLS({
-      hostname: SMTP_HOST,
-      port: SMTP_PORT,
-      username: SMTP_USER,
-      password: SMTP_PASS,
-    })
+    // Always save to database as fallback
+    let dbSaved = false
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+      try {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+        const { error } = await supabase.from("contact_messages").insert({
+          name,
+          email,
+          message,
+          sent_via_email: false,
+        })
+        if (!error) dbSaved = true
+      } catch (dbErr) {
+        console.error("DB save error:", dbErr)
+      }
+    }
 
-    await client.send({
-      from: SMTP_USER,
-      to: DEST_EMAIL,
-      subject: `[ScanOrder] Pesan dari ${name}`,
-      content: `Nama: ${name}\nEmail: ${email}\n\nPesan:\n${message}`,
-      html: `
-        <div style="font-family:sans-serif;max-width:500px;margin:0 auto">
-          <h2 style="color:#2563EB">Pesan dari ScanOrder</h2>
-          <p><strong>Nama:</strong> ${name}</p>
-          <p><strong>Email:</strong> ${email}</p>
-          <hr style="border:none;border-top:1px solid #eee"/>
-          <p style="white-space:pre-wrap">${message}</p>
-        </div>
-      `,
-    })
+    // Check Apps Script URL
+    if (!APPS_SCRIPT_URL) {
+      if (dbSaved) {
+        return new Response(JSON.stringify({
+          success: true,
+          warning: "Pesan tersimpan (email belum aktif)"
+        }), {
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        })
+      }
+      return new Response(JSON.stringify({ error: "Email belum dikonfigurasi. Hubungi admin." }), {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      })
+    }
 
-    await client.close()
+    // Send email via Google Apps Script
+    try {
+      const emailRes = await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, message }),
+      })
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-    })
+      const emailBody = await emailRes.text()
+      let emailResult: Record<string, unknown> = {}
+      try { emailResult = JSON.parse(emailBody) } catch (_) {}
+
+      if (emailResult.success) {
+        // Mark as sent in DB
+        if (dbSaved && SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+          try {
+            const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+            await supabase.from("contact_messages")
+              .update({ sent_via_email: true })
+              .eq("email", email)
+              .eq("sent_via_email", false)
+              .order("created_at", { ascending: false })
+              .limit(1)
+          } catch (_) {}
+        }
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        })
+      } else {
+        const errMsg = emailResult.error ?? emailBody
+        console.error("Apps Script error:", errMsg)
+        if (dbSaved) {
+          return new Response(JSON.stringify({
+            success: true,
+            warning: "Email gagal, pesan tersimpan di database",
+            smtp_error: String(errMsg),
+          }), {
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          })
+        }
+        return new Response(JSON.stringify({ error: "Email gagal: " + errMsg }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        })
+      }
+    } catch (emailErr) {
+      const msg = emailErr instanceof Error ? emailErr.message : String(emailErr)
+      console.error("Email error:", msg)
+      if (dbSaved) {
+        return new Response(JSON.stringify({
+          success: true,
+          warning: "Email gagal, pesan tersimpan di database",
+          smtp_error: msg,
+        }), {
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        })
+      }
+      return new Response(JSON.stringify({ error: "Email gagal: " + msg }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      })
+    }
   } catch (err) {
     console.error("Send error:", err)
-    return new Response(JSON.stringify({ error: "Gagal mengirim pesan" }), {
+    return new Response(JSON.stringify({
+      error: "Server error: " + (err instanceof Error ? err.message : String(err))
+    }), {
       status: 500,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
     })

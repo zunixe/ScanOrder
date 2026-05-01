@@ -1,0 +1,745 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:package_info_plus/package_info_plus.dart' as pinfo;
+import '../../core/theme.dart';
+import '../../core/supabase/supabase_service.dart';
+import '../../services/quota_service.dart';
+import '../auth/auth_provider.dart';
+import '../auth/login_dialog.dart';
+import '../contact/contact_page.dart';
+import '../subscription/subscription_provider.dart';
+import 'settings_provider.dart';
+
+const _settingsTitleStyle = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
+const _settingsSubtitleStyle = TextStyle(fontSize: 12, color: Colors.grey);
+const _settingsSectionStyle = TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey);
+const _settingsTilePadding = EdgeInsets.symmetric(horizontal: 16, vertical: 2);
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  String _appVersion = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await pinfo.PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() => _appVersion = '${info.version} (${info.buildNumber})');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Pengaturan')),
+      body: Consumer2<AuthProvider, SubscriptionProvider>(
+        builder: (_, auth, sub, _) {
+          final isTeam = sub.currentTier == StorageTier.unlimited;
+          return ListView(
+            children: [
+              // ── 1. Profil User ──
+              _ProfileSection(auth: auth, tier: sub.currentTier),
+              const Divider(height: 1),
+
+              // ── 2. Kelola Team ──
+              if (isTeam || auth.hasTeam) ...[
+                _TeamSection(auth: auth, isTeamAdmin: isTeam),
+                const Divider(height: 1),
+              ],
+
+              // ── 3. Pengaturan ──
+              const _SettingsSection(),
+              const Divider(height: 1),
+
+              // ── 4. Backup & Sync ──
+              _SyncSection(auth: auth),
+              const Divider(height: 1),
+
+              // ── 5. Hubungi Kami ──
+              ListTile(
+                dense: true,
+                contentPadding: _settingsTilePadding,
+                leading: const Icon(Icons.contact_mail_outlined),
+                title: const Text('Hubungi Kami', style: _settingsTitleStyle),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ContactPage()),
+                ),
+              ),
+              const Divider(height: 1),
+
+              // ── 6. Tentang ──
+              ListTile(
+                dense: true,
+                contentPadding: _settingsTilePadding,
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Tentang Aplikasi', style: _settingsTitleStyle),
+                subtitle: Text('v$_appVersion', style: _settingsSubtitleStyle),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showAboutDialog(),
+              ),
+              ListTile(
+                dense: true,
+                contentPadding: _settingsTilePadding,
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('Kebijakan Privasi', style: _settingsTitleStyle),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showDocument('Kebijakan Privasi', 'PRIVACY_POLICY.md'),
+              ),
+              ListTile(
+                dense: true,
+                contentPadding: _settingsTilePadding,
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Syarat & Ketentuan', style: _settingsTitleStyle),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _showDocument('Syarat & Ketentuan', 'TERMS_OF_SERVICE.md'),
+              ),
+              const Divider(height: 1),
+
+              // ── 7. Logout ──
+              if (auth.isLoggedIn)
+                ListTile(
+                  dense: true,
+                  contentPadding: _settingsTilePadding,
+                  leading: const Icon(Icons.logout, color: Colors.red),
+                  title: const Text('Logout', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.red)),
+                  onTap: () => _showLogoutDialog(auth),
+                ),
+
+              const SizedBox(height: 32),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAboutDialog() {
+    showAboutDialog(
+      context: context,
+      applicationName: 'ScanOrder',
+      applicationVersion: _appVersion,
+      applicationIcon: const Icon(Icons.qr_code_scanner, size: 48, color: AppTheme.primaryColor),
+      children: [
+        const Text('Aplikasi scan & kelola nomor resi pengiriman.'),
+      ],
+    );
+  }
+
+  void _showDocument(String title, String asset) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: asset == 'PRIVACY_POLICY.md'
+              ? const _PrivacyPolicyContent()
+              : const _TermsContent(),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+      ),
+    );
+  }
+
+  void _showLogoutDialog(AuthProvider auth) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Yakin ingin logout? Data lokal tetap tersimpan.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              auth.signOut();
+            },
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DocumentItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _DocumentItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 22, color: AppTheme.primaryColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: _settingsTitleStyle),
+                const SizedBox(height: 1),
+                Text(
+                  subtitle,
+                  style: _settingsSubtitleStyle,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrivacyPolicyContent extends StatelessWidget {
+  const _PrivacyPolicyContent();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _DocumentItem(
+          icon: Icons.storage_outlined,
+          title: 'Data yang Disimpan',
+          subtitle: 'Email akun, data scan/resi, kategori, riwayat, informasi tim, dan preferensi aplikasi.',
+        ),
+        _DocumentItem(
+          icon: Icons.sync_outlined,
+          title: 'Penggunaan Data',
+          subtitle: 'Data digunakan untuk scan, riwayat, kategori, export, team, backup, dan sinkronisasi.',
+        ),
+        _DocumentItem(
+          icon: Icons.verified_user_outlined,
+          title: 'Keamanan',
+          subtitle: 'Data cloud disimpan melalui Supabase dengan aturan akses pengguna. Data tidak dijual ke pihak lain.',
+        ),
+        _DocumentItem(
+          icon: Icons.phone_android_outlined,
+          title: 'Data Lokal',
+          subtitle: 'Data yang dihapus dari cloud belum tentu langsung hilang dari perangkat jika belum sync ulang.',
+        ),
+      ],
+    );
+  }
+}
+
+class _TermsContent extends StatelessWidget {
+  const _TermsContent();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _DocumentItem(
+          icon: Icons.qr_code_scanner_outlined,
+          title: 'Penggunaan Aplikasi',
+          subtitle: 'ScanOrder membantu scan, menyimpan, mengelompokkan, menyalin, export, dan sync nomor resi.',
+        ),
+        _DocumentItem(
+          icon: Icons.workspace_premium_outlined,
+          title: 'Akun dan Paket',
+          subtitle: 'Fitur tertentu memerlukan login dan paket aktif. Free, Basic, Pro, dan Team memiliki fitur berbeda.',
+        ),
+        _DocumentItem(
+          icon: Icons.groups_outlined,
+          title: 'Paket Team',
+          subtitle: 'Admin dan anggota bertanggung jawab atas invite code, data scan, kategori, dan akses tim.',
+        ),
+        _DocumentItem(
+          icon: Icons.cloud_sync_outlined,
+          title: 'Data dan Sinkronisasi',
+          subtitle: 'Data dapat tersimpan lokal dan cloud. Perbedaan data bisa terjadi jika perangkat belum tersinkronisasi.',
+        ),
+        _DocumentItem(
+          icon: Icons.payments_outlined,
+          title: 'Pembayaran',
+          subtitle: 'Pembelian paket mengikuti aturan platform pembayaran yang digunakan.',
+        ),
+        _DocumentItem(
+          icon: Icons.rule_outlined,
+          title: 'Tanggung Jawab Pengguna',
+          subtitle: 'Pengguna wajib memastikan data resi, kategori, dan export digunakan sesuai kebutuhan operasional.',
+        ),
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// 1. PROFILE SECTION
+// ────────────────────────────────────────────────────────────
+
+class _ProfileSection extends StatelessWidget {
+  final AuthProvider auth;
+  final StorageTier tier;
+  const _ProfileSection({required this.auth, required this.tier});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = SupabaseService().currentUser;
+    final email = user?.email ?? 'Belum login';
+    final initials = email.isNotEmpty ? email[0].toUpperCase() : '?';
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 32,
+            backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.15),
+            child: Text(
+              initials,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(email, style: _settingsTitleStyle),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _tierColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _tierLabel,
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _tierColor),
+                      ),
+                    ),
+                    if (!auth.isLoggedIn) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => showLoginDialog(context),
+                        child: const Text('Login'),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color get _tierColor {
+    switch (tier) {
+      case StorageTier.unlimited:
+        return Colors.purple;
+      case StorageTier.pro:
+        return Colors.blue;
+      case StorageTier.basic:
+        return Colors.teal;
+      case StorageTier.free:
+        return Colors.grey;
+    }
+  }
+
+  String get _tierLabel {
+    switch (tier) {
+      case StorageTier.unlimited:
+        return 'Team';
+      case StorageTier.pro:
+        return 'Pro';
+      case StorageTier.basic:
+        return 'Basic';
+      case StorageTier.free:
+        return 'Free';
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// 2. TEAM SECTION
+// ────────────────────────────────────────────────────────────
+
+class _TeamSection extends StatelessWidget {
+  final AuthProvider auth;
+  final bool isTeamAdmin;
+  const _TeamSection({required this.auth, required this.isTeamAdmin});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 2),
+          child: Text('Kelola Tim', style: _settingsSectionStyle),
+        ),
+        if (auth.hasTeam) ...[
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const CircleAvatar(
+              backgroundColor: Colors.purple,
+              child: Icon(Icons.groups, color: Colors.white),
+            ),
+            title: Text(auth.currentTeam!.name, style: _settingsTitleStyle),
+            subtitle: Text('Kode invite: ${auth.currentTeam!.inviteCode}', style: _settingsSubtitleStyle),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy),
+              tooltip: 'Salin kode invite',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: auth.currentTeam!.inviteCode));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Kode invite disalin'), duration: Duration(seconds: 1)),
+                );
+              },
+            ),
+          ),
+          // Anggota tim
+          if (auth.teamMembers.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
+              child: Row(
+                children: [
+                  const Icon(Icons.people_outline, size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text('Anggota (${auth.teamMembers.length})', style: _settingsSectionStyle),
+                ],
+              ),
+            ),
+          ...auth.teamMembers.map((member) => ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: CircleAvatar(
+              radius: 16,
+              backgroundColor: member.role == 'admin' ? Colors.orange : Colors.blue,
+              child: Icon(member.role == 'admin' ? Icons.star : Icons.person, color: Colors.white, size: 14),
+            ),
+            title: Text(member.email ?? member.userId, style: _settingsTitleStyle),
+            subtitle: Text(member.role == 'admin' ? 'Admin' : 'Anggota', style: _settingsSubtitleStyle),
+          )),
+          // Keluar tim
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: OutlinedButton.icon(
+              onPressed: () => _showLeaveTeamDialog(context, auth),
+              icon: const Icon(Icons.exit_to_app, size: 16),
+              label: const Text('Keluar Tim'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
+            ),
+          ),
+        ] else ...[
+          // Belum punya tim
+          if (isTeamAdmin)
+            ListTile(
+              dense: true,
+              contentPadding: _settingsTilePadding,
+              leading: const Icon(Icons.add_circle_outline),
+              title: const Text('Buat Tim Baru', style: _settingsTitleStyle),
+              onTap: () => _showCreateTeamDialog(context, auth),
+            ),
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const Icon(Icons.group_add_outlined),
+            title: const Text('Gabung Tim', style: _settingsTitleStyle),
+            subtitle: const Text('Masukkan kode invite', style: _settingsSubtitleStyle),
+            onTap: () => _showJoinTeamDialog(context, auth),
+          ),
+        ],
+      ],
+    );
+  }
+
+  void _showCreateTeamDialog(BuildContext context, AuthProvider auth) {
+    final nameCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Buat Tim Baru'),
+        content: TextField(
+          controller: nameCtrl,
+          decoration: const InputDecoration(labelText: 'Nama Tim', hintText: 'Contoh: Tim Gudang'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            onPressed: () async {
+              if (nameCtrl.text.trim().isNotEmpty) {
+                await auth.createTeam(nameCtrl.text.trim());
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Tim berhasil dibuat: ${auth.currentTeam?.name ?? ''}')),
+                );
+              }
+            },
+            child: const Text('Buat'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showJoinTeamDialog(BuildContext context, AuthProvider auth) {
+    final codeCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gabung Tim'),
+        content: TextField(
+          controller: codeCtrl,
+          decoration: const InputDecoration(labelText: 'Kode Invite', hintText: 'Contoh: ABC123'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            onPressed: () async {
+              if (codeCtrl.text.trim().isNotEmpty) {
+                await auth.joinTeam(codeCtrl.text.trim().toUpperCase());
+                if (!ctx.mounted) return;
+                if (auth.error == null && auth.hasTeam) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Berhasil gabung tim: ${auth.currentTeam?.name ?? ''}')),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(auth.error ?? 'Gagal gabung tim')),
+                  );
+                }
+              }
+            },
+            child: const Text('Gabung'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLeaveTeamDialog(BuildContext context, AuthProvider auth) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Keluar dari Tim'),
+        content: Text('Kamu akan keluar dari tim "${auth.currentTeam?.name ?? ''}". Quota scan akan kembali ke paket pribadimu. Lanjutkan?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await auth.leaveTeam();
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(auth.error == null ? 'Berhasil keluar dari tim' : auth.error!)),
+              );
+            },
+            child: const Text('Keluar Tim'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// 3. SETTINGS SECTION (toggles)
+// ────────────────────────────────────────────────────────────
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SettingsProvider>(
+      builder: (_, settings, _) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 2),
+              child: Text('Pengaturan', style: _settingsSectionStyle),
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: _settingsTilePadding,
+              secondary: const Icon(Icons.volume_up_outlined),
+              title: const Text('Suara Scan', style: _settingsTitleStyle),
+              subtitle: const Text('Putar suara saat scan berhasil', style: _settingsSubtitleStyle),
+              value: settings.soundEnabled,
+              onChanged: (v) => settings.setSoundEnabled(v),
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: _settingsTilePadding,
+              secondary: const Icon(Icons.vibration_outlined),
+              title: const Text('Getar', style: _settingsTitleStyle),
+              subtitle: const Text('Getaran saat scan', style: _settingsSubtitleStyle),
+              value: settings.vibrationEnabled,
+              onChanged: (v) => settings.setVibrationEnabled(v),
+            ),
+            SwitchListTile(
+              dense: true,
+              contentPadding: _settingsTilePadding,
+              secondary: const Icon(Icons.screen_lock_portrait_outlined),
+              title: const Text('Layar Tetap Nyala', style: _settingsTitleStyle),
+              subtitle: const Text('Cegah layar mati saat di halaman scan', style: _settingsSubtitleStyle),
+              value: settings.wakelockEnabled,
+              onChanged: (v) => settings.setWakelockEnabled(v),
+            ),
+            ListTile(
+              dense: true,
+              contentPadding: _settingsTilePadding,
+              leading: const Icon(Icons.dark_mode_outlined),
+              title: const Text('Tema', style: _settingsTitleStyle),
+              subtitle: Text(_darkModeLabel(settings.darkMode), style: _settingsSubtitleStyle),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _showDarkModePicker(context, settings),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _darkModeLabel(String mode) {
+    switch (mode) {
+      case 'light':
+        return 'Terang';
+      case 'dark':
+        return 'Gelap';
+      default:
+        return 'Ikuti Sistem';
+    }
+  }
+
+  void _showDarkModePicker(BuildContext context, SettingsProvider settings) {
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Pilih Tema'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () { settings.setDarkMode('system'); Navigator.pop(ctx); },
+            child: Row(
+              children: [
+                Icon(settings.darkMode == 'system' ? Icons.radio_button_checked : Icons.radio_button_unchecked, color: AppTheme.primaryColor),
+                const SizedBox(width: 12),
+                const Text('Ikuti Sistem'),
+              ],
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () { settings.setDarkMode('light'); Navigator.pop(ctx); },
+            child: Row(
+              children: [
+                Icon(settings.darkMode == 'light' ? Icons.radio_button_checked : Icons.radio_button_unchecked, color: AppTheme.primaryColor),
+                const SizedBox(width: 12),
+                const Text('Terang'),
+              ],
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () { settings.setDarkMode('dark'); Navigator.pop(ctx); },
+            child: Row(
+              children: [
+                Icon(settings.darkMode == 'dark' ? Icons.radio_button_checked : Icons.radio_button_unchecked, color: AppTheme.primaryColor),
+                const SizedBox(width: 12),
+                const Text('Gelap'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// 4. SYNC SECTION
+// ────────────────────────────────────────────────────────────
+
+class _SyncSection extends StatelessWidget {
+  final AuthProvider auth;
+  const _SyncSection({required this.auth});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoggedIn = auth.isLoggedIn;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 2),
+          child: Text('Backup & Sync', style: _settingsSectionStyle),
+        ),
+        ListTile(
+          dense: true,
+          contentPadding: _settingsTilePadding,
+          leading: Icon(
+            isLoggedIn ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+            color: isLoggedIn ? Colors.green : Colors.grey,
+          ),
+          title: Text(isLoggedIn ? 'Terkoneksi ke Cloud' : 'Belum Login', style: _settingsTitleStyle),
+          subtitle: Text(isLoggedIn
+              ? 'Data tersinkronisasi ke cloud'
+              : 'Login untuk backup & sync otomatis', style: _settingsSubtitleStyle),
+        ),
+        if (isLoggedIn)
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const Icon(Icons.sync),
+            title: const Text('Sync Manual', style: _settingsTitleStyle),
+            subtitle: const Text('Push data lokal ke cloud', style: _settingsSubtitleStyle),
+            onTap: () async {
+              try {
+                await context.read<AuthProvider>().syncOnLogin();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Sync berhasil'), duration: Duration(seconds: 1)),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Gagal sync: $e')),
+                  );
+                }
+              }
+            },
+          ),
+      ],
+    );
+  }
+}

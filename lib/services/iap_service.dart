@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_android/in_app_purchase_android.dart';
+import 'package:in_app_purchase_android/billing_client_wrappers.dart';
 import 'quota_service.dart';
 
 class IapService {
@@ -14,6 +17,9 @@ class IapService {
   bool _isAvailable = false;
   List<ProductDetails> _products = [];
   List<String> _notFoundIds = [];
+
+  // Track active purchases for subscription upgrade support
+  final Map<String, PurchaseDetails> _activePurchases = {};
 
   bool get isAvailable => _isAvailable;
   List<ProductDetails> get products => List.unmodifiable(_products);
@@ -65,7 +71,26 @@ class IapService {
       return false;
     }
 
-    final purchaseParam = PurchaseParam(productDetails: product);
+    // On Android, if upgrading from an existing subscription, use ChangeSubscriptionParam
+    PurchaseParam purchaseParam;
+    if (Platform.isAndroid) {
+      final existingPurchase = _findExistingSubscriptionPurchase(tier);
+      if (existingPurchase != null) {
+        debugPrint('[IAP] Upgrading from ${existingPurchase.productID} to $productId');
+        purchaseParam = GooglePlayPurchaseParam(
+          productDetails: product,
+          changeSubscriptionParam: ChangeSubscriptionParam(
+            oldPurchaseDetails: existingPurchase as GooglePlayPurchaseDetails,
+            replacementMode: ReplacementMode.withTimeProration,
+          ),
+        );
+      } else {
+        purchaseParam = PurchaseParam(productDetails: product);
+      }
+    } else {
+      purchaseParam = PurchaseParam(productDetails: product);
+    }
+
     return _iap.buyNonConsumable(purchaseParam: purchaseParam);
   }
 
@@ -91,6 +116,7 @@ class IapService {
       }
 
       if (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) {
+        _activePurchases[purchase.productID] = purchase;
         final tier = tierForProductId(purchase.productID);
         if (tier != null) {
           await _quota.purchaseOrChangeTier(tier);
@@ -115,6 +141,17 @@ class IapService {
       case StorageTier.free:
         return '';
     }
+  }
+
+  /// Find an existing active subscription purchase for a lower tier
+  PurchaseDetails? _findExistingSubscriptionPurchase(StorageTier newTier) {
+    for (final entry in _activePurchases.entries) {
+      final existingTier = tierForProductId(entry.key);
+      if (existingTier != null && existingTier.index < newTier.index) {
+        return entry.value;
+      }
+    }
+    return null;
   }
 
   StorageTier? tierForProductId(String productId) {

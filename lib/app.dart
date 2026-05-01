@@ -10,10 +10,20 @@ import 'features/stats/stats_page.dart';
 import 'features/stats/stats_provider.dart';
 import 'features/subscription/subscription_page.dart';
 import 'features/subscription/subscription_provider.dart';
+import 'features/settings/settings_page.dart';
+import 'features/settings/settings_provider.dart';
 import 'features/auth/auth_provider.dart';
 
 class ScanOrderApp extends StatelessWidget {
   const ScanOrderApp({super.key});
+
+  static ThemeMode _getThemeMode(String mode) {
+    switch (mode) {
+      case 'light': return ThemeMode.light;
+      case 'dark': return ThemeMode.dark;
+      default: return ThemeMode.system;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,15 +33,18 @@ class ScanOrderApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => HistoryProvider()),
         ChangeNotifierProvider(create: (_) => StatsProvider()),
         ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
+        ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
-      child: MaterialApp(
-        title: 'ScanOrder',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
-        darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.system,
-        home: const MainShell(),
+      child: Consumer<SettingsProvider>(
+        builder: (_, settings, _) => MaterialApp(
+          title: 'ScanOrder',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: _getThemeMode(settings.darkMode),
+          home: const MainShell(),
+        ),
       ),
     );
   }
@@ -52,6 +65,7 @@ class _MainShellState extends State<MainShell> {
     const HistoryPage(key: PageStorageKey('history')),
     const StatsPage(key: PageStorageKey('stats')),
     const SubscriptionPage(key: PageStorageKey('subscription')),
+    const SettingsPage(key: PageStorageKey('settings')),
   ];
 
   @override
@@ -61,6 +75,7 @@ class _MainShellState extends State<MainShell> {
       final auth = context.read<AuthProvider>();
       auth.addListener(_onAuthChange);
       _syncUserId(auth);
+      context.read<SettingsProvider>().loadSettings();
     });
   }
 
@@ -73,7 +88,6 @@ class _MainShellState extends State<MainShell> {
     final userId = SupabaseService().currentUser?.id;
     context.read<HistoryProvider>().setUserId(userId);
     context.read<HistoryProvider>().refresh();
-    // Refresh scan counts & quota when user changes
     context.read<ScanProvider>().loadCounts();
     context.read<SubscriptionProvider>().loadStatus();
   }
@@ -110,7 +124,12 @@ class _MainShellState extends State<MainShell> {
                 NavigationRailDestination(
                   icon: Icon(Icons.workspace_premium_outlined),
                   selectedIcon: Icon(Icons.workspace_premium),
-                  label: Text('Pro'),
+                  label: Text('Info Paket'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: Text('Settings'),
                 ),
               ],
             ),
@@ -147,7 +166,12 @@ class _MainShellState extends State<MainShell> {
                 NavigationDestination(
                   icon: Icon(Icons.workspace_premium_outlined),
                   selectedIcon: Icon(Icons.workspace_premium),
-                  label: 'Pro',
+                  label: 'Info Paket',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: 'Settings',
                 ),
               ],
             ),
@@ -162,6 +186,8 @@ class _MainShellState extends State<MainShell> {
       context.read<StatsProvider>().loadStats();
     } else if (i == 3) {
       context.read<SubscriptionProvider>().loadStatus();
+    } else if (i == 4) {
+      context.read<SettingsProvider>().loadSettings();
     }
   }
 }

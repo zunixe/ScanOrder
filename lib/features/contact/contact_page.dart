@@ -49,11 +49,17 @@ class _ContactPageState extends State<ContactPage> {
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final isSuccess = body['success'] == true;
+      final warning = body['warning'] as String?;
+      final error = body['error'] as String?;
+
+      if (isSuccess) {
+        final msg = warning ?? 'Pesan berhasil dikirim!';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Pesan berhasil dikirim!'),
-            backgroundColor: AppTheme.successColor,
+            content: Text(msg),
+            backgroundColor: warning != null ? Colors.orange : AppTheme.successColor,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -61,9 +67,14 @@ class _ContactPageState extends State<ContactPage> {
         _emailController.clear();
         _messageController.clear();
       } else {
+        debugPrint('[Contact] Error ${response.statusCode}: ${response.body}');
+        final errorMsg = error ??
+            (response.statusCode == 404
+                ? 'Layanan kontak belum aktif.'
+                : 'Gagal mengirim pesan (${response.statusCode}). Coba lagi nanti.');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Gagal mengirim pesan. Coba lagi nanti.'),
+            content: Text(errorMsg),
             backgroundColor: AppTheme.dangerColor,
             behavior: SnackBarBehavior.floating,
           ),
