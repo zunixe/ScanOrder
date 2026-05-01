@@ -59,7 +59,7 @@ class _ScanPageState extends State<ScanPage> {
 
     _lastScannedCode = code;
     _onCooldown = true;
-    _cooldownTimer = Timer(const Duration(milliseconds: 800), () {
+    _cooldownTimer = Timer(const Duration(milliseconds: 1500), () {
       _onCooldown = false;
       _lastScannedCode = null;
     });
@@ -69,6 +69,7 @@ class _ScanPageState extends State<ScanPage> {
 
   Future<void> _handleScan(String code, BarcodeCapture capture) async {
     final provider = context.read<ScanProvider>();
+    final teamId = context.read<AuthProvider>().currentTeam?.id;
 
     // Capture photo simultaneously during scan
     String? photoPath;
@@ -84,7 +85,6 @@ class _ScanPageState extends State<ScanPage> {
       }
     }
 
-    final teamId = context.read<AuthProvider>().currentTeam?.id;
     final result = await provider.processScan(code, photoPath, teamId: teamId);
     if (result == null) return;
 
@@ -101,6 +101,11 @@ class _ScanPageState extends State<ScanPage> {
         Vibration.vibrate(duration: 500, amplitude: 255);
         HapticFeedback.heavyImpact();
         if (mounted) _showDuplicateOverlay(result);
+        break;
+
+      case ScanStatus.recentRepeat:
+        HapticFeedback.selectionClick();
+        if (mounted) _showRecentRepeatOverlay(result);
         break;
 
       case ScanStatus.quotaExceeded:
@@ -190,7 +195,51 @@ class _ScanPageState extends State<ScanPage> {
           ],
         ),
         backgroundColor: AppTheme.dangerColor,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  void _showRecentRepeatOverlay(ScanResult result) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'BARU SAJA DISCAN',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    result.resi,
+                    style: const TextStyle(fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const Text(
+                    'Diabaikan agar tidak terbaca double',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.blueGrey,
+        duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

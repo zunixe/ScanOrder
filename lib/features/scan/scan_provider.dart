@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
@@ -7,9 +5,11 @@ import '../../models/order.dart';
 import '../../models/category.dart';
 import '../../services/marketplace_detector.dart';
 import '../../services/quota_service.dart';
+import '../../services/sync_queue.dart';
+import '../../services/sound_service.dart';
 import 'package:intl/intl.dart';
 
-enum ScanStatus { idle, success, duplicate, quotaExceeded }
+enum ScanStatus { idle, success, duplicate, recentRepeat, quotaExceeded }
 
 class ScanResult {
   final ScanStatus status;
@@ -37,6 +37,8 @@ class ScanProvider extends ChangeNotifier {
   StorageTier currentTier = StorageTier.free;
   bool _processing = false;
   bool _savePhoto = true;
+  final Map<String, DateTime> _recentScans = {};
+  static const Duration _recentRepeatWindow = Duration(seconds: 5);
 
   // Category support (Team tier only)
   List<ScanCategory> categories = [];
@@ -131,9 +133,22 @@ class ScanProvider extends ChangeNotifier {
 
       final marketplace = MarketplaceDetector.detect(resi);
 
+      final recentAt = _recentScans[resi];
+      final now = DateTime.now();
+      if (recentAt != null && now.difference(recentAt) < _recentRepeatWindow) {
+        lastResult = ScanResult(
+          status: ScanStatus.recentRepeat,
+          resi: resi,
+          marketplace: marketplace,
+        );
+        notifyListeners();
+        return lastResult;
+      }
+
       // Check duplicate (indexed query — fast)
       final existing = await _db.findByResi(resi);
       if (existing != null) {
+        SoundService().playScanDuplicate();
         lastResult = ScanResult(
           status: ScanStatus.duplicate,
           resi: resi,
@@ -156,7 +171,6 @@ class ScanProvider extends ChangeNotifier {
       }
 
       // Insert new order with photo
-      final now = DateTime.now();
       final order = ScannedOrder(
         resi: resi,
         marketplace: marketplace,
@@ -177,12 +191,46 @@ class ScanProvider extends ChangeNotifier {
       if (teamId == null) await _quota.consumeScan();
       remainingScans = await _quota.getRemainingFreeScans();
 
-      // Sync ke Supabase backend (fire-and-forget, tidak blocking)
-      Future.microtask(() => _syncToSupabase(order, teamId: teamId));
+      // Sync ke Supabase via queue (reliable, retry, rate-limited)
+      final queue = SyncQueue();
+      final user = SupabaseService().currentUser;
+      if (user != null) {
+        // Enqueue photo upload if needed
+        if (photoPath != null) {
+          queue.enqueue(SyncTaskType.uploadPhoto, {
+            'local_path': photoPath,
+            'user_id': user.id,
+            'resi': resi,
+            'cloud_filename': '${user.id}/${DateTime.now().millisecondsSinceEpoch}.jpg',
+          });
+        }
+        // Enqueue order insert (photo_url will be updated after upload)
+        queue.enqueue(SyncTaskType.insertOrder, {
+          'device_id': 'pending', // will be resolved by queue
+          'user_id': user.id,
+          'resi': resi,
+          'marketplace': marketplace,
+          'scanned_at': now.millisecondsSinceEpoch.toString(),
+          'date': DateFormat('yyyy-MM-dd').format(now),
+          'photo_url': photoPath, // local path, will be updated after upload
+          'team_id': teamId,
+        });
+        // Enqueue subscription sync (quota + storage update)
+        queue.enqueue(SyncTaskType.syncSubscription, {
+          'user_id': user.id,
+          'email': user.email,
+          'tier': 'pending', // will be resolved by queue from current state
+          'cycle_used': '0',
+          'cycle_allowance': '0',
+          'storage_used': '0',
+        });
+      }
 
       todayCount++;
       totalCount++;
+      _recentScans[resi] = now;
 
+      SoundService().playScanSuccess();
       lastResult = ScanResult(
         status: ScanStatus.success,
         resi: resi,
@@ -201,35 +249,5 @@ class ScanProvider extends ChangeNotifier {
   void clearResult() {
     lastResult = null;
     notifyListeners();
-  }
-
-  /// Ambil device ID dan kirim ke Supabase (async, tidak blocking)
-  void _syncToSupabase(ScannedOrder order, {String? teamId}) async {
-    try {
-      final supabase = SupabaseService();
-      final user = supabase.currentUser;
-      if (user == null) return;
-
-      final deviceInfo = DeviceInfoPlugin();
-      String deviceId = 'unknown';
-      if (Platform.isAndroid) {
-        final androidInfo = await deviceInfo.androidInfo;
-        deviceId = androidInfo.id;
-      } else if (Platform.isIOS) {
-        final iosInfo = await deviceInfo.iosInfo;
-        deviceId = iosInfo.identifierForVendor ?? 'unknown';
-      }
-
-      // Gunakan teamId dari parameter (sudah diketahui di processScan)
-      final resolvedTeamId = teamId ?? (await supabase.getMyTeam())?.id;
-
-      if (resolvedTeamId != null) {
-        await supabase.insertOrderWithTeam(order, deviceId: deviceId, teamId: resolvedTeamId);
-      } else {
-        await supabase.insertOrder(order, deviceId: deviceId);
-      }
-    } catch (_) {
-      // Silently fail, Supabase sync is best-effort
-    }
   }
 }

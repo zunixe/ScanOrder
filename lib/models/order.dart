@@ -41,14 +41,14 @@ class ScannedOrder {
     );
   }
 
-  ScannedOrder copyWith({List<ScanCategory>? categories}) {
+  ScannedOrder copyWith({String? photoPath, List<ScanCategory>? categories}) {
     return ScannedOrder(
       id: id,
       resi: resi,
       marketplace: marketplace,
       scannedAt: scannedAt,
       date: date,
-      photoPath: photoPath,
+      photoPath: photoPath ?? this.photoPath,
       categories: categories ?? this.categories,
     );
   }

@@ -2,8 +2,11 @@ class MarketplaceDetector {
   static String detect(String resi) {
     final upper = resi.toUpperCase().trim();
 
-    // Shopee - SPX, SPXID
-    if (upper.startsWith('SPX') || upper.startsWith('SPXID')) {
+    // Shopee - SPX, SPXID, Shopee Instant/Sameday order code
+    if (upper.startsWith('SPX') ||
+        upper.startsWith('SPXID') ||
+        RegExp(r'^26\d{5}[A-Z0-9]{5,10}$').hasMatch(upper) ||
+        RegExp(r'^25\d{5}[A-Z0-9]{5,10}$').hasMatch(upper)) {
       return 'Shopee';
     }
 

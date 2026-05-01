@@ -548,4 +548,20 @@ class SupabaseService {
       return [];
     }
   }
+
+  /// Fetch semua paket dari tabel packages (publik, tidak perlu login)
+  Future<List<Map<String, dynamic>>> fetchPackages() async {
+    final client = _client;
+    if (client == null) return [];
+    try {
+      final res = await client
+          .from('packages')
+          .select()
+          .order('sort_order', ascending: true);
+      return List<Map<String, dynamic>>.from(res);
+    } catch (e) {
+      debugPrint('[Supabase] fetch packages error: $e');
+      return [];
+    }
+  }
 }

@@ -218,6 +218,9 @@ CREATE INDEX IF NOT EXISTS idx_user_subscriptions_updated_at ON user_subscriptio
 -- Tambah kolom email jika tabel sudah ada tanpa kolom ini
 ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS email TEXT;
 
+-- Tambah kolom storage_used untuk tracking penyimpanan per user
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS storage_used BIGINT NOT NULL DEFAULT 0;
+
 -- Index untuk lookup by email (Google login sync)
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_email ON user_subscriptions(email);
 
@@ -235,13 +238,14 @@ RETURNS TABLE (
     active_until TIMESTAMPTZ,
     cycle_allowance INTEGER,
     cycle_used INTEGER,
+    storage_used BIGINT,
     updated_at TIMESTAMPTZ
 )
 LANGUAGE SQL
 SECURITY DEFINER
 SET search_path = public
 AS $$
-    SELECT user_id, email, tier, active_from, active_until, cycle_allowance, cycle_used, updated_at
+    SELECT user_id, email, tier, active_from, active_until, cycle_allowance, cycle_used, storage_used, updated_at
     FROM user_subscriptions
     WHERE email = lookup_email
     LIMIT 1;
@@ -284,3 +288,94 @@ CREATE POLICY "Users manage own order_categories" ON order_categories
     FOR ALL USING (
         category_id IN (SELECT id FROM categories WHERE user_id = auth.uid())
     );
+
+-- ============================================================
+-- DASHBOARD ANON READ POLICIES (read-only for admin dashboard)
+--    Dashboard uses anon key without auth, so we need
+--    separate SELECT policies for the anon role.
+--    Only SELECT is allowed — no INSERT/UPDATE/DELETE.
+-- ============================================================
+
+-- Orders: anon can read all
+DROP POLICY IF EXISTS "orders_anon_select" ON orders;
+CREATE POLICY "orders_anon_select"
+    ON orders FOR SELECT TO anon
+    USING (true);
+
+-- user_subscriptions: anon can read all
+DROP POLICY IF EXISTS "subscription_anon_select" ON user_subscriptions;
+CREATE POLICY "subscription_anon_select"
+    ON user_subscriptions FOR SELECT TO anon
+    USING (true);
+
+-- teams: anon can read all
+DROP POLICY IF EXISTS "teams_anon_select" ON teams;
+CREATE POLICY "teams_anon_select"
+    ON teams FOR SELECT TO anon
+    USING (true);
+
+-- team_members: anon can read all
+DROP POLICY IF EXISTS "team_members_anon_select" ON team_members;
+CREATE POLICY "team_members_anon_select"
+    ON team_members FOR SELECT TO anon
+    USING (true);
+
+-- categories: anon can read all
+DROP POLICY IF EXISTS "categories_anon_select" ON categories;
+CREATE POLICY "categories_anon_select"
+    ON categories FOR SELECT TO anon
+    USING (true);
+
+-- order_categories: anon can read all
+DROP POLICY IF EXISTS "order_categories_anon_select" ON order_categories;
+CREATE POLICY "order_categories_anon_select"
+    ON order_categories FOR SELECT TO anon
+    USING (true);
+
+-- ============================================================
+-- PACKAGES: Master table untuk paket/langganan
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS packages (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    price INTEGER NOT NULL DEFAULT 0,       -- harga per bulan dalam Rupiah
+    scan_limit INTEGER NOT NULL DEFAULT 0,   -- 0 = unlimited
+    max_members INTEGER NOT NULL DEFAULT 1,  -- 1 = personal, >1 = team
+    features TEXT[],                         -- array fitur
+    is_popular BOOLEAN NOT NULL DEFAULT false,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed data paket (sesuai ScanOrder Flutter: quota_service.dart)
+INSERT INTO packages (id, name, price, scan_limit, max_members, features, is_popular, sort_order) VALUES
+    ('free',      'Free',  0,       100, 1,  ARRAY['Scan resi dasar','100 scan/bulan','1 perangkat','100MB penyimpanan'], false, 1),
+    ('basic',     'Basic', 29000,   1000, 1,  ARRAY['1000 scan/bulan','1 perangkat','2GB penyimpanan','Export CSV'], false, 2),
+    ('pro',       'Pro',   99000,   5000, 1,  ARRAY['5000 scan/bulan','1 perangkat','10GB penyimpanan','Export CSV & Excel','Foto bukti scan','Dukungan prioritas'], true, 3),
+    ('unlimited', 'Team',  399000,  0,   10, ARRAY['Scan unlimited','Hingga 10 anggota tim','Dashboard tim','Kategori order','Laporan tim','Penyimpanan unlimited'], false, 4)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    price = EXCLUDED.price,
+    scan_limit = EXCLUDED.scan_limit,
+    max_members = EXCLUDED.max_members,
+    features = EXCLUDED.features,
+    is_popular = EXCLUDED.is_popular,
+    sort_order = EXCLUDED.sort_order,
+    updated_at = NOW();
+
+-- RLS for packages
+ALTER TABLE packages ENABLE ROW LEVEL SECURITY;
+
+-- Semua user bisa baca paket (untuk halaman pricing)
+DROP POLICY IF EXISTS "packages_select_all" ON packages;
+CREATE POLICY "packages_select_all"
+    ON packages FOR SELECT
+    USING (true);
+
+-- packages: anon can read all
+DROP POLICY IF EXISTS "packages_anon_select" ON packages;
+CREATE POLICY "packages_anon_select"
+    ON packages FOR SELECT TO anon
+    USING (true);

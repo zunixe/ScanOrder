@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme.dart';
+import '../../core/supabase/supabase_service.dart';
 import '../../services/quota_service.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
@@ -149,23 +151,49 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
               const SizedBox(height: 16),
 
-              // Cloud Sync Status
+              // Cloud Sync Status & User Profile
               Consumer<AuthProvider>(
                 builder: (_, auth, _) {
                   if (auth.isLoggedIn) {
+                    final user = SupabaseService().currentUser;
+                    final email = user?.email ?? '-';
                     return Card(
                       color: Colors.green.withAlpha(25),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        leading: const CircleAvatar(
-                          backgroundColor: Colors.green,
-                          child: Icon(Icons.cloud_done, color: Colors.white),
-                        ),
-                        title: const Text('Tersambung ke Cloud'),
-                        subtitle: const Text('Data scan tersimpan di cloud'),
-                        trailing: TextButton(
-                          onPressed: () => auth.signOut(),
-                          child: const Text('Logout'),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          children: [
+                            ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: CircleAvatar(
+                                backgroundColor: AppTheme.primaryColor,
+                                child: Text(
+                                  email.isNotEmpty ? email[0].toUpperCase() : '?',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              title: Text(email, style: const TextStyle(fontWeight: FontWeight.w600)),
+                              subtitle: const Text('Tersambung ke Cloud'),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.edit_outlined, size: 20),
+                                tooltip: 'Edit Profil',
+                                onPressed: () => _showProfileDialog(context, auth, email),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red,
+                                  side: const BorderSide(color: Colors.red),
+                                ),
+                                onPressed: () => auth.signOut(),
+                                icon: const Icon(Icons.logout, size: 16),
+                                label: const Text('Logout'),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -283,59 +311,31 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 ),
                 const SizedBox(height: 16),
 
-                // Paket Basic
-                _PricingCard(
-                  title: 'Basic',
-                  subtitle: '1.000 scan / bulan',
-                  price: 'Rp 29.000',
-                  period: '/bulan',
-                  badge: '1rb scan',
-                  features: const [
-                    'Scan resi sampai 1.000/bulan',
-                    'Simpan foto scan',
-                    'Export CSV',
-                  ],
-                  onTap: () => _handlePurchase(StorageTier.basic),
-                  isPrimary: false,
-                ),
-                const SizedBox(height: 12),
-
-                // Paket Pro
-                _PricingCard(
-                  title: 'Pro',
-                  subtitle: '5.000 scan / bulan',
-                  price: 'Rp 99.000',
-                  period: '/bulan',
-                  badge: '5rb scan',
-                  features: const [
-                    'Scan resi sampai 5.000/bulan',
-                    'Sinkronisasi Cloud',
-                    'Backup & restore',
-                    'Akses multi perangkat',
-                    'Tanpa iklan',
-                  ],
-                  onTap: () => _handlePurchase(StorageTier.pro),
-                  isPrimary: true,
-                ),
-                const SizedBox(height: 12),
-
-                // Paket Team
-                _PricingCard(
-                  title: 'Team',
-                  subtitle: 'Unlimited scan',
-                  price: 'Rp 399.000',
-                  period: '/bulan',
-                  badge: '∞ scan',
-                  features: const [
-                    'Scan resi tanpa batas',
-                    'Tim & manajemen anggota',
-                    'Sinkronisasi real-time',
-                    'Export XLSX (Excel)',
-                    'Priority support',
-                  ],
-                  onTap: () => _handlePurchase(StorageTier.unlimited),
-                  isPrimary: false,
-                ),
+                // Dynamic pricing cards from packages table
+                ...provider.packages
+                    .where((pkg) => pkg.id != 'free')
+                    .map((pkg) {
+                  final tier = StorageTier.values.firstWhere(
+                    (t) => t.name == pkg.id,
+                    orElse: () => StorageTier.free,
+                  );
+                  final subtitle = pkg.scanLimit == 0
+                      ? 'Unlimited scan'
+                      : '${pkg.scanLimit >= 1000 ? '${pkg.scanLimit ~/ 1000}.${(pkg.scanLimit % 1000).toString().padLeft(3, '0').replaceAll(RegExp(r'0+\$'), '')}' : pkg.scanLimit} scan / bulan';
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _PricingCard(
+                      title: pkg.name,
+                      subtitle: subtitle,
+                      price: pkg.priceDisplay,
+                      period: '/bulan',
+                      badge: pkg.scanLimitDisplay,
+                      features: pkg.features,
+                      onTap: () => _handlePurchase(tier),
+                      isPrimary: pkg.isPopular,
+                    ),
+                  );
+                }),
 
               ] else ...[
                 // Info paket aktif
@@ -757,6 +757,108 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               }
             },
             child: const Text('Gabung'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showProfileDialog(BuildContext ctx, AuthProvider auth, String currentEmail) {
+    final emailCtrl = TextEditingController(text: currentEmail);
+    final passCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    showDialog(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Profil Saya'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Email (read-only, dari Supabase Auth)
+              TextField(
+                controller: emailCtrl,
+                readOnly: true,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email_outlined),
+                  filled: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Ubah Password',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: newPassCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password Baru',
+                  prefixIcon: Icon(Icons.lock_outline),
+                  hintText: 'Min. 6 karakter',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: passCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password Lama (verifikasi)',
+                  prefixIcon: Icon(Icons.lock_outline),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Tutup'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final newPass = newPassCtrl.text.trim();
+              final oldPass = passCtrl.text.trim();
+              if (newPass.isEmpty || newPass.length < 6) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Password baru min. 6 karakter')),
+                );
+                return;
+              }
+              if (oldPass.isEmpty) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Masukkan password lama untuk verifikasi')),
+                );
+                return;
+              }
+              try {
+                final client = SupabaseService().client;
+                if (client == null) return;
+                // Re-authenticate lalu update password
+                await client.auth.signInWithPassword(
+                  email: currentEmail,
+                  password: oldPass,
+                );
+                await client.auth.updateUser(
+                  UserAttributes(password: newPass),
+                );
+                if (!dialogCtx.mounted) return;
+                Navigator.pop(dialogCtx);
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Password berhasil diubah')),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(content: Text('Gagal: ${e.toString()}')),
+                );
+              }
+            },
+            child: const Text('Simpan'),
           ),
         ],
       ),

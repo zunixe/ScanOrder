@@ -3,8 +3,40 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/db/database_helper.dart';
 import '../core/supabase/supabase_service.dart';
+import 'sync_queue.dart';
 
 enum StorageTier { free, basic, pro, unlimited }
+
+class PackageInfo {
+  final String id;
+  final String name;
+  final int price;
+  final int scanLimit; // 0 = unlimited
+  final int maxMembers;
+  final List<String> features;
+  final bool isPopular;
+
+  const PackageInfo({
+    required this.id,
+    required this.name,
+    required this.price,
+    required this.scanLimit,
+    required this.maxMembers,
+    required this.features,
+    required this.isPopular,
+  });
+
+  String get priceDisplay {
+    if (price == 0) return 'Gratis';
+    return 'Rp ${price.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
+  }
+
+  String get scanLimitDisplay {
+    if (scanLimit == 0) return '∞';
+    if (scanLimit >= 1000) return '${scanLimit ~/ 1000}rb';
+    return '$scanLimit';
+  }
+}
 
 class QuotaService {
   // Scan limits per tier (per bulan)
@@ -22,6 +54,17 @@ class QuotaService {
   static const int _basicLimit = 2 * 1024 * 1024 * 1024; // 2GB
   static const int _proLimit = 10 * 1024 * 1024 * 1024;  // 10GB
 
+  // Hardcoded fallback packages (dipakai jika DB tidak bisa diakses)
+  static const List<PackageInfo> _fallbackPackages = [
+    PackageInfo(id: 'free',      name: 'Free',  price: 0,      scanLimit: 100,  maxMembers: 1,  features: ['Scan resi dasar','100 scan/bulan','1 perangkat','100MB penyimpanan'], isPopular: false),
+    PackageInfo(id: 'basic',     name: 'Basic', price: 29000,  scanLimit: 1000, maxMembers: 1,  features: ['1000 scan/bulan','1 perangkat','2GB penyimpanan','Export CSV'], isPopular: false),
+    PackageInfo(id: 'pro',       name: 'Pro',   price: 99000,  scanLimit: 5000, maxMembers: 1,  features: ['5000 scan/bulan','1 perangkat','10GB penyimpanan','Export CSV & Excel','Foto bukti scan','Dukungan prioritas'], isPopular: true),
+    PackageInfo(id: 'unlimited', name: 'Team',  price: 399000, scanLimit: 0,    maxMembers: 10, features: ['Scan unlimited','Hingga 10 anggota tim','Dashboard tim','Kategori order','Laporan tim','Penyimpanan unlimited'], isPopular: false),
+  ];
+
+  List<PackageInfo> _packages = [];
+  List<PackageInfo> get packages => _packages.isEmpty ? _fallbackPackages : _packages;
+
 
   final DatabaseHelper _db = DatabaseHelper.instance;
   final SupabaseService _supabase = SupabaseService();
@@ -33,6 +76,12 @@ class QuotaService {
   static const int _cycleDays = 30;
 
   int _defaultAllowanceForTier(StorageTier tier) {
+    // Coba ambil dari packages dulu
+    final pkg = packages.where((p) => p.id == tier.name).firstOrNull;
+    if (pkg != null) {
+      return pkg.scanLimit == 0 ? -1 : pkg.scanLimit;
+    }
+    // Fallback ke hardcoded
     switch (tier) {
       case StorageTier.free:
         return _freeScans;
@@ -42,6 +91,28 @@ class QuotaService {
         return _proScans;
       case StorageTier.unlimited:
         return -1;
+    }
+  }
+
+  /// Load packages dari Supabase. Dipanggil saat app start.
+  /// Jika gagal, tetap pakai hardcoded fallback.
+  Future<void> loadPackages() async {
+    try {
+      final rows = await _supabase.fetchPackages();
+      if (rows.isNotEmpty) {
+        _packages = rows.map((row) => PackageInfo(
+          id: row['id'] as String? ?? '',
+          name: row['name'] as String? ?? '',
+          price: (row['price'] as num?)?.toInt() ?? 0,
+          scanLimit: (row['scan_limit'] as num?)?.toInt() ?? 0,
+          maxMembers: (row['max_members'] as num?)?.toInt() ?? 1,
+          features: (row['features'] as List?)?.map((e) => e.toString()).toList() ?? [],
+          isPopular: row['is_popular'] as bool? ?? false,
+        )).toList();
+        debugPrint('[QuotaService] Loaded ${_packages.length} packages from DB');
+      }
+    } catch (e) {
+      debugPrint('[QuotaService] Failed to load packages from DB: $e');
     }
   }
 
@@ -209,6 +280,10 @@ class QuotaService {
   }
 
   String getScanLimitDisplay(StorageTier tier) {
+    // Coba ambil dari packages dulu
+    final pkg = packages.where((p) => p.id == tier.name).firstOrNull;
+    if (pkg != null) return pkg.scanLimitDisplay;
+    // Fallback
     switch (tier) {
       case StorageTier.free: return '$_freeScans';
       case StorageTier.basic: return '$_basicScans';
@@ -218,6 +293,10 @@ class QuotaService {
   }
 
   String getTierName(StorageTier tier) {
+    // Coba ambil dari packages dulu
+    final pkg = packages.where((p) => p.id == tier.name).firstOrNull;
+    if (pkg != null) return pkg.name;
+    // Fallback
     switch (tier) {
       case StorageTier.free: return 'Gratis';
       case StorageTier.basic: return 'Basic';
@@ -227,6 +306,10 @@ class QuotaService {
   }
 
   int getPriceForTier(StorageTier tier) {
+    // Coba ambil dari packages dulu
+    final pkg = packages.where((p) => p.id == tier.name).firstOrNull;
+    if (pkg != null) return pkg.price;
+    // Fallback ke hardcoded
     switch (tier) {
       case StorageTier.free: return 0;
       case StorageTier.basic: return _basicPrice;
@@ -368,17 +451,23 @@ class QuotaService {
     final endMs = prefs.getInt(_cycleEndKey);
     final allowance = prefs.getInt(_cycleAllowanceKey) ?? _freeScans;
     final used = prefs.getInt(_cycleUsedKey) ?? 0;
+    final storageUsed = await getUsedBytes();
 
-    await _supabase.upsertMySubscription({
+    // Enqueue via SyncQueue for reliable delivery with retry
+    final queue = SyncQueue();
+    queue.enqueue(SyncTaskType.syncSubscription, {
+      'user_id': _supabase.currentUser!.id,
+      'email': _supabase.currentUser!.email ?? '',
       'tier': tier,
       'active_from': startMs != null
           ? DateTime.fromMillisecondsSinceEpoch(startMs).toIso8601String()
-          : null,
+          : '',
       'active_until': endMs != null
           ? DateTime.fromMillisecondsSinceEpoch(endMs).toIso8601String()
-          : null,
-      'cycle_allowance': allowance,
-      'cycle_used': used,
+          : '',
+      'cycle_allowance': allowance.toString(),
+      'cycle_used': used.toString(),
+      'storage_used': storageUsed.toString(),
     });
   }
 }

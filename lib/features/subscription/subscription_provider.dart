@@ -25,8 +25,11 @@ class SubscriptionProvider extends ChangeNotifier {
   bool isPurchasing = false;
   String? purchaseError;
   List<String> notFoundProductIds = [];
+  List<PackageInfo> packages = [];
 
   Future<void> initializeIap() async {
+    await _quota.loadPackages();
+    packages = _quota.packages;
     await _iap.initialize(onPurchaseApplied: (_) async {
       isPurchasing = false;
       await loadStatus();
