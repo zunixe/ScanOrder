@@ -3,6 +3,9 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
+import '../../services/quota_service.dart';
+import '../subscription/subscription_page.dart';
+import '../subscription/subscription_provider.dart';
 import 'stats_provider.dart';
 
 class StatsPage extends StatefulWidget {
@@ -21,6 +24,9 @@ class _StatsPageState extends State<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final sub = context.watch<SubscriptionProvider>();
+    final isFree = sub.currentTier == StorageTier.free;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Statistik'),
@@ -31,7 +37,7 @@ class _StatsPageState extends State<StatsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Summary cards
+              // Summary cards — selalu tampil
               Row(
                 children: [
                   Expanded(
@@ -54,133 +60,193 @@ class _StatsPageState extends State<StatsPage> {
                 ],
               ),
 
-              const SizedBox(height: 24),
+              if (isFree) ...[
+                const SizedBox(height: 24),
+                _buildLockedSection(context),
+              ] else ...[
+                const SizedBox(height: 24),
 
-              // Storage usage card
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.storage,
-                            color: AppTheme.primaryColor,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Penyimpanan',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
+                // Storage usage card
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.storage,
+                              color: AppTheme.primaryColor,
+                              size: 20,
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _StorageRow(
-                        label: 'Database',
-                        value: provider.formattedDbSize,
-                        icon: Icons.dataset_outlined,
-                      ),
-                      const Divider(height: 16),
-                      _StorageRow(
-                        label: 'Foto (${provider.photoCount})',
-                        value: provider.formattedPhotoSize,
-                        icon: Icons.photo_library_outlined,
-                      ),
-                      const Divider(height: 16),
-                      _StorageRow(
-                        label: 'Total',
-                        value: provider.formattedTotalSize,
-                        icon: Icons.folder_outlined,
-                        isBold: true,
-                      ),
-                    ],
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Penyimpanan',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _StorageRow(
+                          label: 'Database',
+                          value: provider.formattedDbSize,
+                          icon: Icons.dataset_outlined,
+                        ),
+                        const Divider(height: 16),
+                        _StorageRow(
+                          label: 'Foto (${provider.photoCount})',
+                          value: provider.formattedPhotoSize,
+                          icon: Icons.photo_library_outlined,
+                        ),
+                        const Divider(height: 16),
+                        _StorageRow(
+                          label: 'Total',
+                          value: provider.formattedTotalSize,
+                          icon: Icons.folder_outlined,
+                          isBold: true,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Period selector + bar chart
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
+                // Period selector + bar chart
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Order per Hari',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SegmentedButton<int>(
+                      segments: const [
+                        ButtonSegment(value: 7, label: Text('7h')),
+                        ButtonSegment(value: 14, label: Text('14h')),
+                        ButtonSegment(value: 30, label: Text('30h')),
+                      ],
+                      selected: {provider.periodDays},
+                      onSelectionChanged: (v) => provider.setPeriod(v.first),
+                      style: ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        textStyle: WidgetStatePropertyAll(
+                          Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 200,
+                  child: _DailyBarChart(
+                    stats: provider.dailyStats,
+                    days: provider.periodDays,
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Marketplace breakdown
+                const Text(
+                  'Marketplace',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                if (provider.marketplaceStats.isEmpty)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'Belum ada data',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                else ...[
+                  SizedBox(
+                    height: 180,
+                    child: _MarketplacePieChart(stats: provider.marketplaceStats),
+                  ),
+                  const SizedBox(height: 12),
+                  ...provider.marketplaceStats.entries.map(
+                    (e) => _MarketplaceRow(
+                      name: e.key,
+                      count: e.value,
+                      total: provider.totalOrders,
+                    ),
+                  ),
+                ],
+
+                // Category breakdown (Team tier only)
+                if (provider.categoryStats.isNotEmpty) ...[
+                  const SizedBox(height: 24),
                   const Text(
-                    'Order per Hari',
+                    'Kategori',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment(value: 7, label: Text('7h')),
-                      ButtonSegment(value: 14, label: Text('14h')),
-                      ButtonSegment(value: 30, label: Text('30h')),
-                    ],
-                    selected: {provider.periodDays},
-                    onSelectionChanged: (v) => provider.setPeriod(v.first),
-                    style: ButtonStyle(
-                      visualDensity: VisualDensity.compact,
-                      textStyle: WidgetStatePropertyAll(
-                        Theme.of(context).textTheme.labelSmall,
-                      ),
+                  const SizedBox(height: 12),
+                  ...provider.categoryStats.entries.map(
+                    (e) => _CategoryRow(
+                      name: e.key,
+                      count: e.value,
+                      total: provider.totalOrders,
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 200,
-                child: _DailyBarChart(
-                  stats: provider.dailyStats,
-                  days: provider.periodDays,
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Marketplace breakdown
-              const Text(
-                'Marketplace',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              if (provider.marketplaceStats.isEmpty)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'Belum ada data',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                )
-              else ...[
-                SizedBox(
-                  height: 180,
-                  child: _MarketplacePieChart(stats: provider.marketplaceStats),
-                ),
-                const SizedBox(height: 12),
-                ...provider.marketplaceStats.entries.map(
-                  (e) => _MarketplaceRow(
-                    name: e.key,
-                    count: e.value,
-                    total: provider.totalOrders,
-                  ),
-                ),
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLockedSection(BuildContext context) {
+    return Card(
+      color: Colors.grey[100],
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Icon(Icons.lock_outline, size: 48, color: Colors.grey[400]),
+            const SizedBox(height: 12),
+            const Text(
+              'Statistik Lengkap',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Upgrade ke Basic atau lebih tinggi untuk melihat grafik, penyimpanan, dan breakdown marketplace.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SubscriptionPage()),
+                );
+              },
+              icon: const Icon(Icons.workspace_premium),
+              label: const Text('Subscribe'),
+            ),
+          ],
         ),
       ),
     );
@@ -435,6 +501,66 @@ class _MarketplaceRow extends StatelessWidget {
   final int total;
 
   const _MarketplaceRow({
+    required this.name,
+    required this.count,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = AppTheme.getMarketplaceColor(name);
+    final pct = total > 0 ? (count / total * 100) : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+          Text(
+            '$count',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 45,
+            child: Text(
+              '${pct.toStringAsFixed(1)}%',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryRow extends StatelessWidget {
+  final String name;
+  final int count;
+  final int total;
+
+  const _CategoryRow({
     required this.name,
     required this.count,
     required this.total,

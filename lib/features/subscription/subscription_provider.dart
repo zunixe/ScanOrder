@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
+import '../../services/iap_service.dart';
 import '../../services/quota_service.dart';
 
 class SubscriptionProvider extends ChangeNotifier {
   final QuotaService _quota = QuotaService();
+  final IapService _iap = IapService();
 
   bool isPro = false;
   int totalScanned = 0;
@@ -19,6 +21,21 @@ class SubscriptionProvider extends ChangeNotifier {
   bool subscriptionActive = true;
   int cycleAllowance = 0;
   int cycleUsed = 0;
+  bool iapAvailable = false;
+  bool isPurchasing = false;
+  String? purchaseError;
+  List<String> notFoundProductIds = [];
+
+  Future<void> initializeIap() async {
+    await _iap.initialize(onPurchaseApplied: (_) async {
+      isPurchasing = false;
+      await loadStatus();
+    });
+    iapAvailable = _iap.isAvailable;
+    notFoundProductIds = _iap.notFoundProductIds;
+    // Don't show product-not-found error on init — only when user tries to buy
+    notifyListeners();
+  }
 
   Future<void> loadStatus() async {
     await _quota.syncFromCloud();
@@ -41,29 +58,49 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   Future<void> restorePurchase() async {
-    // TODO: Implement IAP restore logic
+    purchaseError = null;
+    isPurchasing = true;
+    notifyListeners();
+    await initializeIap();
+    if (!iapAvailable) {
+      purchaseError = 'Google Play Billing belum tersedia di perangkat ini.';
+      isPurchasing = false;
+      notifyListeners();
+      return;
+    }
+    await _iap.restorePurchases();
+    isPurchasing = false;
     await loadStatus();
   }
 
   Future<void> purchaseTier(StorageTier tier) async {
-    // TODO: Implement IAP purchase logic with in_app_purchase
-    // For demo/testing, set tier directly:
-    await _quota.purchaseOrChangeTier(tier);
-    await loadStatus();
+    purchaseError = null;
+    isPurchasing = true;
+    notifyListeners();
+    await initializeIap();
+    if (!iapAvailable) {
+      purchaseError = 'Google Play Billing belum tersedia. Pastikan app di-install dari Play Store/internal testing.';
+      isPurchasing = false;
+      notifyListeners();
+      return;
+    }
+    final started = await _iap.buyTier(tier);
+    if (!started) {
+      final productId = _iap.productIdForTier(tier);
+      if (notFoundProductIds.isNotEmpty) {
+        purchaseError = 'Produk tidak ditemukan: ${notFoundProductIds.join(', ')}. '
+            'Pastikan Product ID di Google Play Console sama dengan di app:\n'
+            '• Basic: scanorder_basic_monthly\n'
+            '• Pro: scanorder_pro_monthly\n'
+            '• Team: scanorder_team_monthly';
+      } else {
+        purchaseError = 'Produk $productId belum tersedia. Cek Product ID di Google Play Console.';
+      }
+      isPurchasing = false;
+      notifyListeners();
+    }
   }
 
-  // For testing only — cycle through tiers
-  Future<void> toggleTierDebug() async {
-    final nextIndex = (currentTier.index + 1) % 4;
-    await _quota.purchaseOrChangeTier(StorageTier.values[nextIndex], carryOver: false);
-    await loadStatus();
-  }
-
-  // Reset quota ke batas tier saat ini (debug)
-  Future<void> resetQuotaDebug() async {
-    await _quota.purchaseOrChangeTier(currentTier, carryOver: false);
-    await loadStatus();
-  }
 
   String get storageUsed {
     if (usedBytes >= 1024 * 1024 * 1024) {
@@ -89,5 +126,11 @@ class SubscriptionProvider extends ChangeNotifier {
   double get storageFraction {
     if (totalBytes <= 0) return 0;
     return (usedBytes / totalBytes).clamp(0.0, 1.0);
+  }
+
+  @override
+  void dispose() {
+    _iap.dispose();
+    super.dispose();
   }
 }

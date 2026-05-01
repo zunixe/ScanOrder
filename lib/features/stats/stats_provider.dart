@@ -4,12 +4,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/supabase/supabase_service.dart';
 
 class StatsProvider extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
   Map<String, int> dailyStats = {};
   Map<String, int> marketplaceStats = {};
+  Map<String, int> categoryStats = {};
   int totalOrders = 0;
   int periodDays = 7;
 
@@ -19,15 +21,21 @@ class StatsProvider extends ChangeNotifier {
   int photoCount = 0;
 
   Future<void> loadStats() async {
+    final userId = SupabaseService().currentUser?.id;
     dailyStats = await _db.getDailyStats(periodDays);
     marketplaceStats = await _db.getMarketplaceStats();
-    totalOrders = await _db.getTotalOrderCount();
+    totalOrders = await _db.getTotalOrderCount(userId: userId);
+    categoryStats = await _db.getCategoryStats(userId: userId);
     await _loadStorageStats();
     notifyListeners();
   }
 
   Future<void> _loadStorageStats() async {
     try {
+      dbSizeBytes = 0;
+      photoSizeBytes = 0;
+      photoCount = 0;
+
       // Database size
       final dbPath = await getDatabasesPath();
       final dbFile = File(join(dbPath, 'scanorder.db'));

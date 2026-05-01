@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/db/database_helper.dart';
 import '../core/supabase/supabase_service.dart';
@@ -169,7 +170,8 @@ class QuotaService {
   }
 
   Future<int> getUsedBytes() async {
-    final orders = await _db.getAllOrders();
+    final userId = _supabase.currentUser?.id;
+    final orders = await _db.getAllOrders(userId: userId);
     int total = 0;
     for (final order in orders) {
       final path = order.photoPath;
@@ -191,7 +193,8 @@ class QuotaService {
   }
 
   Future<int> getTotalScanned() async {
-    return await _db.getTotalOrderCount();
+    final userId = _supabase.currentUser?.id;
+    return await _db.getTotalOrderCount(userId: userId);
   }
 
   Future<int> getRemainingFreeScans() async {
@@ -263,18 +266,29 @@ class QuotaService {
     final newBase = _defaultAllowanceForTier(newTier);
     int newAllowance;
 
+    // Hitung sisa hari periode lama
+    final oldEndMs = prefs.getInt(_cycleEndKey) ?? 0;
+    final remainingDays = oldEndMs > now.millisecondsSinceEpoch
+        ? ((oldEndMs - now.millisecondsSinceEpoch) / (1000 * 60 * 60 * 24)).ceil()
+        : 0;
+
     if (newBase < 0) {
       newAllowance = -1; // Unlimited
-    } else if (carryOver && wasActive && newTier.index > oldTier.index && oldRemaining > 0) {
+    } else if (carryOver && wasActive && oldTier != StorageTier.free && newTier.index > oldTier.index && oldRemaining > 0) {
       // Upgrade: carry-over sisa quota lama
       newAllowance = newBase + oldRemaining;
     } else {
       newAllowance = newBase; // Reset ke batas tier
     }
 
+    // Hitung periode baru: 30 hari + sisa hari dari periode lama (jika upgrade & carry-over)
+    final extraDays = (carryOver && wasActive && oldTier != StorageTier.free && newTier.index > oldTier.index && remainingDays > 0)
+        ? remainingDays
+        : 0;
+
     await prefs.setString(_tierKey, newTier.name);
     await prefs.setInt(_cycleStartKey, now.millisecondsSinceEpoch);
-    await prefs.setInt(_cycleEndKey, now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+    await prefs.setInt(_cycleEndKey, now.add(Duration(days: _cycleDays + extraDays)).millisecondsSinceEpoch);
     await prefs.setInt(_cycleAllowanceKey, newAllowance);
     await prefs.setInt(_cycleUsedKey, 0);
     await syncToCloud();
@@ -286,7 +300,28 @@ class QuotaService {
 
   Future<void> syncFromCloud() async {
     if (_supabase.currentUser == null) return;
+    final user = _supabase.currentUser;
     final cloud = await _supabase.fetchMySubscription();
+
+    // Jika tidak ada subscription by user_id, coba fetch by email (untuk Google login link)
+    if (cloud == null && user?.email != null) {
+      debugPrint('[QuotaService] No subscription by user_id, trying email...');
+      final cloudByEmail = await _supabase.fetchSubscriptionByEmail(user!.email!);
+      if (cloudByEmail != null) {
+        // Copy subscription ke user_id baru dan update email
+        await _supabase.upsertMySubscription({
+          'tier': cloudByEmail['tier'],
+          'active_from': cloudByEmail['active_from'],
+          'active_until': cloudByEmail['active_until'],
+          'cycle_allowance': cloudByEmail['cycle_allowance'],
+          'cycle_used': cloudByEmail['cycle_used'],
+        });
+        debugPrint('[QuotaService] Subscription copied from email to new user_id');
+        // Fetch lagi sekarang sudah ada
+        return syncFromCloud();
+      }
+      return;
+    }
     if (cloud == null) return;
 
     final prefs = await SharedPreferences.getInstance();
@@ -294,11 +329,11 @@ class QuotaService {
     final localTierStr = prefs.getString(_tierKey) ?? 'free';
 
     // Konversi ke enum untuk perbandingan
-    StorageTier _parse(String s) {
+    StorageTier parse(String s) {
       return StorageTier.values.firstWhere((e) => e.name == s, orElse: () => StorageTier.free);
     }
-    final cloudTier = _parse(cloudTierStr);
-    final localTier = _parse(localTierStr);
+    final cloudTier = parse(cloudTierStr);
+    final localTier = parse(localTierStr);
 
     // Jangan downgrade tier lokal — hanya apply cloud jika tier cloud >= lokal
     if (cloudTier.index < localTier.index) return;

@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
+import '../../models/category.dart';
 
 class HistoryProvider extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
@@ -12,17 +13,34 @@ class HistoryProvider extends ChangeNotifier {
   List<String> availableDates = [];
   String searchQuery = '';
   bool isSearching = false;
+  int? filterCategoryId;
+  List<ScanCategory> categories = [];
+
+  String? _userId;
+
+  void setUserId(String? userId) {
+    _userId = userId;
+  }
 
   Future<void> loadDates() async {
-    availableDates = await _db.getDistinctDates();
+    availableDates = await _db.getDistinctDates(userId: _userId);
     notifyListeners();
   }
 
   Future<void> loadOrders() async {
-    if (isSearching && searchQuery.isNotEmpty) {
-      orders = await _db.searchOrders(searchQuery);
+    if (filterCategoryId != null) {
+      orders = await _db.getOrdersByCategory(filterCategoryId!, userId: _userId);
+    } else if (isSearching && searchQuery.isNotEmpty) {
+      orders = await _db.searchOrders(searchQuery, userId: _userId);
     } else {
-      orders = await _db.getOrdersByDate(selectedDate);
+      orders = await _db.getOrdersByDate(selectedDate, userId: _userId);
+    }
+    // Attach categories to orders
+    for (var i = 0; i < orders.length; i++) {
+      if (orders[i].id != null) {
+        final cats = await _db.getCategoriesForOrder(orders[i].id!);
+        orders[i] = orders[i].copyWith(categories: cats);
+      }
     }
     notifyListeners();
   }
@@ -59,6 +77,17 @@ class HistoryProvider extends ChangeNotifier {
   Future<void> refresh() async {
     await loadDates();
     await loadOrders();
+    await loadCategories();
+  }
+
+  Future<void> loadCategories() async {
+    categories = await _db.getAllCategories(userId: _userId);
+    notifyListeners();
+  }
+
+  void setFilterCategory(int? categoryId) {
+    filterCategoryId = categoryId;
+    loadOrders();
   }
 
   Future<void> updatePhoto(int id, String? photoPath) async {
@@ -67,6 +96,14 @@ class HistoryProvider extends ChangeNotifier {
   }
 
   Future<List<ScannedOrder>> getAllForExport() async {
-    return await _db.getAllOrders();
+    final orders = await _db.getAllOrders(userId: _userId);
+    // Attach categories to each order for export
+    for (var i = 0; i < orders.length; i++) {
+      if (orders[i].id != null) {
+        final cats = await _db.getCategoriesForOrder(orders[i].id!);
+        orders[i] = orders[i].copyWith(categories: cats);
+      }
+    }
+    return orders;
   }
 }

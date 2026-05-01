@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
+import 'package:excel/excel.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -10,9 +11,11 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
 import '../../models/order.dart';
+import '../../services/quota_service.dart';
 import 'history_provider.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
+import '../subscription/subscription_provider.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -30,6 +33,7 @@ class _HistoryPageState extends State<HistoryPage> {
     final provider = context.read<HistoryProvider>();
     provider.loadDates();
     provider.loadOrders();
+    provider.loadCategories();
   }
 
   @override
@@ -43,13 +47,15 @@ class _HistoryPageState extends State<HistoryPage> {
     final orders = await provider.getAllForExport();
 
     final rows = <List<String>>[
-      ['No', 'Resi', 'Marketplace', 'Tanggal', 'Waktu'],
+      ['No', 'Resi', 'Marketplace', 'Kategori', 'Tanggal', 'Waktu'],
       ...orders.asMap().entries.map((e) {
         final o = e.value;
+        final cats = o.categories.map((c) => c.name).join(', ');
         return [
           '${e.key + 1}',
           o.resi,
           o.marketplace,
+          cats,
           o.date,
           DateFormat('HH:mm:ss').format(o.scannedAt),
         ];
@@ -61,7 +67,91 @@ class _HistoryPageState extends State<HistoryPage> {
     final file = File(p.join(dir.path, 'scanorder_export.csv'));
     await file.writeAsString(csv);
 
-    await Share.shareXFiles([XFile(file.path)], text: 'ScanOrder Export');
+    await Share.shareXFiles([XFile(file.path)], text: 'ScanOrder Export CSV');
+  }
+
+  Future<void> _exportXlsx() async {
+    final provider = context.read<HistoryProvider>();
+    final orders = await provider.getAllForExport();
+
+    final excel = Excel.createExcel();
+    final sheet = excel['ScanOrder'];
+
+    // Header
+    final headers = ['No', 'Resi', 'Marketplace', 'Kategori', 'Tanggal', 'Waktu'];
+    for (var c = 0; c < headers.length; c++) {
+      final cell = sheet.cell(CellIndex.indexByString('${String.fromCharCode(65 + c)}1'));
+      cell.value = TextCellValue(headers[c]);
+      cell.cellStyle = CellStyle(bold: true);
+    }
+
+    // Data rows
+    for (var i = 0; i < orders.length; i++) {
+      final o = orders[i];
+      final cats = o.categories.map((c) => c.name).join(', ');
+      final row = i + 2;
+      sheet.cell(CellIndex.indexByString('A$row')).value = IntCellValue(i + 1);
+      sheet.cell(CellIndex.indexByString('B$row')).value = TextCellValue(o.resi);
+      sheet.cell(CellIndex.indexByString('C$row')).value = TextCellValue(o.marketplace);
+      sheet.cell(CellIndex.indexByString('D$row')).value = TextCellValue(cats);
+      sheet.cell(CellIndex.indexByString('E$row')).value = TextCellValue(o.date);
+      sheet.cell(CellIndex.indexByString('F$row')).value = TextCellValue(DateFormat('HH:mm:ss').format(o.scannedAt));
+    }
+
+    // Auto-fit column widths
+    for (var c = 0; c < headers.length; c++) {
+      sheet.setColumnWidth(c, 18);
+    }
+
+    final dir = await getTemporaryDirectory();
+    final file = File(p.join(dir.path, 'scanorder_export.xlsx'));
+    final bytes = excel.save(fileName: 'scanorder_export.xlsx');
+    if (bytes == null) return;
+    await file.writeAsBytes(bytes);
+
+    await Share.shareXFiles([XFile(file.path)], text: 'ScanOrder Export XLSX');
+  }
+
+  void _showExportMenu() {
+    final auth = context.read<AuthProvider>();
+    final isTeam = context.read<SubscriptionProvider>().currentTier == StorageTier.unlimited;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.table_chart),
+              title: const Text('Export CSV'),
+              subtitle: const Text('Format tabel, bisa dibuka di semua app'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _exportCsv();
+              },
+            ),
+            if (isTeam)
+              ListTile(
+                leading: const Icon(Icons.file_present),
+                title: const Text('Export XLSX (Excel)'),
+                subtitle: const Text('Format Excel, khusus paket Team'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _exportXlsx();
+                },
+              ),
+            if (!isTeam && auth.isLoggedIn)
+              ListTile(
+                leading: const Icon(Icons.lock_outline, color: Colors.grey),
+                title: const Text('Export XLSX (Excel)'),
+                subtitle: const Text('Upgrade ke Team untuk export Excel'),
+                enabled: false,
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _pickDate() async {
@@ -83,10 +173,15 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         title: const Text('Riwayat Order'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.file_download_outlined),
-            onPressed: _exportCsv,
-            tooltip: 'Export CSV',
+          Consumer<SubscriptionProvider>(
+            builder: (_, sub, __) {
+              if (sub.currentTier == StorageTier.free) return const SizedBox.shrink();
+              return IconButton(
+                icon: const Icon(Icons.file_download_outlined),
+                onPressed: _showExportMenu,
+                tooltip: 'Export',
+              );
+            },
           ),
         ],
       ),
@@ -204,6 +299,45 @@ class _HistoryPageState extends State<HistoryPage> {
 
             const SizedBox(height: 8),
 
+            // Category filter chips (Team tier only)
+            Consumer<HistoryProvider>(
+              builder: (_, provider, _) {
+                if (provider.categories.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ChoiceChip(
+                            label: const Text('Semua'),
+                            selected: provider.filterCategoryId == null,
+                            onSelected: (_) => provider.setFilterCategory(null),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                        ...provider.categories.map((cat) => Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ChoiceChip(
+                            label: Text(cat.name),
+                            selected: provider.filterCategoryId == cat.id,
+                            onSelected: (_) => provider.setFilterCategory(cat.id),
+                            backgroundColor: _parseColor(cat.color).withValues(alpha: 0.15),
+                            selectedColor: _parseColor(cat.color).withValues(alpha: 0.3),
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        )),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
             // Order list
             Expanded(
               child: provider.orders.isEmpty
@@ -256,6 +390,14 @@ class _HistoryPageState extends State<HistoryPage> {
     return DateFormat('dd MMM yyyy', 'id').format(date);
   }
 
+  Color _parseColor(String hex) {
+    try {
+      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return Colors.blue;
+    }
+  }
+
   Future<void> _scanToSearch(BuildContext ctx, HistoryProvider provider) async {
     final result = await showDialog<String>(
       context: ctx,
@@ -290,6 +432,14 @@ class _OrderTile extends StatelessWidget {
   final ScannedOrder order;
   final bool isLatest;
   const _OrderTile({required this.order, this.isLatest = false});
+
+  Color _parseCatColor(String hex) {
+    try {
+      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return Colors.blue;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -356,13 +506,36 @@ class _OrderTile extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle: Text(
-            order.marketplace,
-            style: TextStyle(
-              fontSize: 12,
-              color: color,
-              fontWeight: FontWeight.w500,
-            ),
+          subtitle: Row(
+            children: [
+              Text(
+                order.marketplace,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (order.categories.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                ...order.categories.map((cat) => Container(
+                  margin: const EdgeInsets.only(right: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: _parseCatColor(cat.color).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    cat.name,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: _parseCatColor(cat.color),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )),
+              ],
+            ],
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,

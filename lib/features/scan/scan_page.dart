@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/theme.dart';
 import '../../features/auth/auth_provider.dart';
+import '../../models/category.dart';
+import '../../services/quota_service.dart';
 import 'scan_provider.dart';
 
 class ScanPage extends StatefulWidget {
@@ -27,16 +30,19 @@ class _ScanPageState extends State<ScanPage> {
   @override
   void initState() {
     super.initState();
+    WakelockPlus.enable();
     _controller = MobileScannerController(
-      detectionSpeed: DetectionSpeed.normal,
+      detectionSpeed: DetectionSpeed.unrestricted,
       facing: CameraFacing.back,
       returnImage: true,
+      formats: [BarcodeFormat.code128, BarcodeFormat.code39, BarcodeFormat.code93, BarcodeFormat.ean13, BarcodeFormat.qrCode],
     );
     context.read<ScanProvider>().loadCounts();
   }
 
   @override
   void dispose() {
+    WakelockPlus.disable();
     _controller?.dispose();
     _cooldownTimer?.cancel();
     super.dispose();
@@ -53,8 +59,9 @@ class _ScanPageState extends State<ScanPage> {
 
     _lastScannedCode = code;
     _onCooldown = true;
-    _cooldownTimer = Timer(const Duration(seconds: 2), () {
+    _cooldownTimer = Timer(const Duration(milliseconds: 800), () {
       _onCooldown = false;
+      _lastScannedCode = null;
     });
 
     _handleScan(code, capture);
@@ -62,24 +69,21 @@ class _ScanPageState extends State<ScanPage> {
 
   Future<void> _handleScan(String code, BarcodeCapture capture) async {
     final provider = context.read<ScanProvider>();
-    
-    // Capture photo from the BarcodeCapture (mobile_scanner returnImage: true)
+
+    // Capture photo simultaneously during scan
     String? photoPath;
-    try {
-      if (capture.image != null && capture.image!.isNotEmpty) {
-        final directory = await getApplicationDocumentsDirectory();
-        final path = '${directory.path}/scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final file = File(path);
+    if (provider.savePhoto && capture.image != null) {
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final file = File('${dir.path}/$fileName');
         await file.writeAsBytes(capture.image!);
-        photoPath = path;
-        debugPrint('Photo saved to: $photoPath');
-      } else {
-        debugPrint('capture.image is null or empty');
+        photoPath = file.path;
+      } catch (_) {
+        photoPath = null;
       }
-    } catch (e) {
-      debugPrint('Failed to capture photo: $e');
     }
-    
+
     final teamId = context.read<AuthProvider>().currentTeam?.id;
     final result = await provider.processScan(code, photoPath, teamId: teamId);
     if (result == null) return;
@@ -226,6 +230,178 @@ class _ScanPageState extends State<ScanPage> {
     return '${dt.day}/${dt.month}/${dt.year} $h:$m';
   }
 
+  Color _parseColor(String hex) {
+    try {
+      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
+    } catch (_) {
+      return Colors.blue;
+    }
+  }
+
+  void _showCreateCategoryDialog(BuildContext context) {
+    final nameController = TextEditingController();
+    String selectedColor = '#2196F3'; // default blue
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Kategori Baru'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nama kategori',
+                  hintText: 'Misal: Gudang A, Retur',
+                  border: OutlineInputBorder(),
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  '#F44336', '#E91E63', '#9C27B0', '#2196F3',
+                  '#009688', '#4CAF50', '#FF9800', '#795548',
+                ].map((hex) => GestureDetector(
+                  onTap: () => setState(() => selectedColor = hex),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _parseColor(hex),
+                      shape: BoxShape.circle,
+                      border: selectedColor == hex
+                          ? Border.all(color: Colors.white, width: 3)
+                          : null,
+                    ),
+                  ),
+                )).toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (nameController.text.trim().isEmpty) return;
+                context.read<ScanProvider>().addCategory(nameController.text.trim(), selectedColor);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Buat'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCategoryOptions(BuildContext context, ScanCategory cat) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: _parseColor(cat.color),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    cat.name,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('Rename'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showRenameCategoryDialog(context, cat);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Hapus', style: TextStyle(color: Colors.red)),
+              subtitle: const Text('Order akan kembali ke kategori utama'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (dCtx) => AlertDialog(
+                    title: Text('Hapus "${cat.name}"?'),
+                    content: const Text('Order dalam kategori ini akan kembali ke kategori utama (Semua).'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
+                      TextButton(
+                        onPressed: () => Navigator.pop(dCtx, true),
+                        child: const Text('Hapus', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true && context.mounted) {
+                  context.read<ScanProvider>().deleteCategory(cat.id!);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showRenameCategoryDialog(BuildContext context, ScanCategory cat) {
+    final nameController = TextEditingController(text: cat.name);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename Kategori'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(
+            labelText: 'Nama kategori',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (nameController.text.trim().isEmpty) return;
+              context.read<ScanProvider>().renameCategory(cat.id!, nameController.text.trim());
+              Navigator.pop(ctx);
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -281,6 +457,17 @@ class _ScanPageState extends State<ScanPage> {
                             fontSize: 13,
                           ),
                         ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Sisa: ${provider.quotaDisplay}',
+                          style: TextStyle(
+                            color: provider.remainingScans <= 10 && provider.scanLimit > 0
+                                ? Colors.orangeAccent
+                                : Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ],
                     ),
                     Row(
@@ -331,6 +518,152 @@ class _ScanPageState extends State<ScanPage> {
                   ],
                 ),
               ),
+            ),
+          ),
+
+          // Category chips (Team tier only)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 80,
+            left: 0,
+            right: 0,
+            child: Consumer<ScanProvider>(
+              builder: (_, provider, _) {
+                if (provider.currentTier != StorageTier.unlimited) {
+                  return const SizedBox.shrink();
+                }
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.5),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        // "Semua" chip
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: GestureDetector(
+                            onTap: () => provider.setActiveCategory(null),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: provider.activeCategoryId == null
+                                    ? Colors.white.withValues(alpha: 0.9)
+                                    : Colors.white.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: provider.activeCategoryId == null
+                                      ? Colors.white
+                                      : Colors.white.withValues(alpha: 0.4),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Text(
+                                'Semua',
+                                style: TextStyle(
+                                  color: provider.activeCategoryId == null
+                                      ? Colors.black87
+                                      : Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: provider.activeCategoryId == null
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        // Category chips
+                        ...provider.categories.map((cat) {
+                          final catColor = _parseColor(cat.color);
+                          final isActive = provider.activeCategoryId == cat.id;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: GestureDetector(
+                              onTap: () => provider.setActiveCategory(cat.id),
+                              onLongPress: () => _showCategoryOptions(context, cat),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: isActive
+                                      ? catColor
+                                      : catColor.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: isActive
+                                        ? catColor
+                                        : catColor.withValues(alpha: 0.6),
+                                    width: 1.5,
+                                ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: isActive ? Colors.white : catColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      cat.name,
+                                      style: TextStyle(
+                                        color: isActive ? Colors.white : Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: isActive
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.more_vert,
+                                      size: 14,
+                                      color: isActive ? Colors.white70 : Colors.white54,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                        // Add category button
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: GestureDetector(
+                            onTap: () => _showCreateCategoryDialog(context),
+                            child: Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.4),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: const Icon(Icons.add, size: 16, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
           ),
 

@@ -90,10 +90,12 @@ class SupabaseService {
       debugPrint('[Supabase] Client not initialized');
       return;
     }
+    final user = currentUser;
     try {
       debugPrint('[Supabase] Inserting order: ${order.resi}');
       await client.from('orders').insert({
         'device_id': deviceId ?? 'unknown',
+        'user_id': user?.id,
         'resi': order.resi,
         'marketplace': order.marketplace,
         'scanned_at': order.scannedAt.millisecondsSinceEpoch,
@@ -125,23 +127,27 @@ class SupabaseService {
     }
   }
 
-  /// Ambil semua orders dari user yang login (berdasarkan device_id)
-  Future<List<Map<String, dynamic>>> fetchOrders({String? deviceId}) async {
+  /// Ambil semua orders dari user yang login (berdasarkan user_id)
+  Future<List<Map<String, dynamic>>> fetchOrders() async {
     final client = _client;
     if (client == null) return [];
+    final user = currentUser;
+    if (user == null) return [];
     try {
-      var query = client.from('orders').select();
-      if (deviceId != null) {
-        query = query.eq('device_id', deviceId);
-      }
-      final response = await query.order('scanned_at', ascending: false);
+      final response = await client
+          .from('orders')
+          .select()
+          .eq('user_id', user.id)
+          .order('scanned_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      debugPrint('[Supabase] fetch orders error: $e');
       return [];
     }
   }
 
   /// Login dengan Google OAuth (browser redirect)
+  /// Secara otomatis link ke akun yang ada jika email sama
   Future<bool> signInWithGoogle() async {
     final client = _client;
     if (client == null) return false;
@@ -154,6 +160,32 @@ class SupabaseService {
     } catch (e) {
       debugPrint('[Supabase] Google OAuth error: $e');
       return false;
+    }
+  }
+
+  /// Manual link identity (Google) ke akun yang ada berdasarkan email
+  /// Dipanggil setelah Google login berhasil
+  Future<void> linkIdentityIfNeeded() async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    if (user.email == null) return;
+
+    // Cek apakah user sudah punya Google identity
+    final hasGoogleIdentity = user.identities?.any((id) => id.provider == 'google') ?? false;
+    if (hasGoogleIdentity) return; // sudah ter-link
+
+    debugPrint('[Supabase] User ${user.email} tidak punya Google identity, mencoba manual link...');
+
+    // Cari user lain dengan email yang sama yang punya Google identity
+    try {
+      // Ini perlu admin key atau server function, tapi untuk sekarang kita skip
+      // Karena Supabase tidak menyediakan API public untuk ini
+      // Solusi: gunakan server-side function atau enable automatic linking di dashboard
+      debugPrint('[Supabase] Manual identity linking memerlukan server function');
+    } catch (e) {
+      debugPrint('[Supabase] Link identity error: $e');
     }
   }
 
@@ -379,6 +411,22 @@ class SupabaseService {
     }
   }
 
+  /// Fetch subscription berdasarkan email (untuk sync saat Google login)
+  /// Menggunakan SECURITY DEFINER function untuk bypass RLS
+  Future<Map<String, dynamic>?> fetchSubscriptionByEmail(String email) async {
+    final client = _client;
+    if (client == null) return null;
+    try {
+      final response = await client
+          .rpc('get_subscription_by_email', params: {'lookup_email': email});
+      if (response == null || (response as List).isEmpty) return null;
+      return Map<String, dynamic>.from(response.first);
+    } catch (e) {
+      debugPrint('[Supabase] fetch subscription by email error: $e');
+      return null;
+    }
+  }
+
   Future<void> upsertMySubscription(Map<String, dynamic> payload) async {
     final client = _client;
     if (client == null) return;
@@ -387,6 +435,7 @@ class SupabaseService {
     try {
       await client.from('user_subscriptions').upsert({
         'user_id': user.id,
+        'email': user.email,
         ...payload,
         'updated_at': DateTime.now().toIso8601String(),
       });
@@ -413,5 +462,90 @@ class SupabaseService {
     final client = _client;
     if (client == null) return const Stream.empty();
     return client.auth.onAuthStateChange;
+  }
+
+  // ── Category sync (Team tier) ──
+
+  Future<void> upsertCategory(int id, String name, String color) async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    try {
+      await client.from('categories').upsert({
+        'id': id,
+        'user_id': user.id,
+        'name': name,
+        'color': color,
+      });
+    } catch (e) {
+      debugPrint('[Supabase] upsert category error: $e');
+    }
+  }
+
+  Future<void> deleteCategory(int categoryId) async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      await client.from('categories').delete().eq('id', categoryId);
+    } catch (e) {
+      debugPrint('[Supabase] delete category error: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchCategories() async {
+    final client = _client;
+    if (client == null) return [];
+    final user = currentUser;
+    if (user == null) return [];
+    try {
+      final res = await client
+          .from('categories')
+          .select()
+          .eq('user_id', user.id)
+          .order('created_at');
+      return List<Map<String, dynamic>>.from(res);
+    } catch (e) {
+      debugPrint('[Supabase] fetch categories error: $e');
+      return [];
+    }
+  }
+
+  Future<void> assignOrderCategory(int orderCategoryId, int orderId, int categoryId) async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      await client.from('order_categories').upsert({
+        'id': orderCategoryId,
+        'order_id': orderId,
+        'category_id': categoryId,
+      });
+    } catch (e) {
+      debugPrint('[Supabase] assign order category error: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchOrderCategories() async {
+    final client = _client;
+    if (client == null) return [];
+    final user = currentUser;
+    if (user == null) return [];
+    try {
+      // Get category IDs for this user
+      final catRes = await client
+          .from('categories')
+          .select('id')
+          .eq('user_id', user.id);
+      final catIds = catRes.map((c) => c['id'] as int).toList();
+      if (catIds.isEmpty) return [];
+      final res = await client
+          .from('order_categories')
+          .select()
+          .inFilter('category_id', catIds);
+      return List<Map<String, dynamic>>.from(res);
+    } catch (e) {
+      debugPrint('[Supabase] fetch order categories error: $e');
+      return [];
+    }
   }
 }

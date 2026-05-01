@@ -186,6 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_teams_invite_code ON teams(invite_code);
 
 CREATE TABLE IF NOT EXISTS user_subscriptions (
     user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT,
     tier TEXT NOT NULL DEFAULT 'free',
     active_from TIMESTAMPTZ,
     active_until TIMESTAMPTZ,
@@ -213,3 +214,73 @@ CREATE POLICY "subscription_update_own"
     WITH CHECK (auth.uid() = user_id);
 
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_updated_at ON user_subscriptions(updated_at);
+
+-- Tambah kolom email jika tabel sudah ada tanpa kolom ini
+ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS email TEXT;
+
+-- Index untuk lookup by email (Google login sync)
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_email ON user_subscriptions(email);
+
+-- ============================================================
+-- 12. Helper function: lookup subscription by email
+--     (SECURITY DEFINER untuk bypass RLS saat Google login)
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION get_subscription_by_email(lookup_email TEXT)
+RETURNS TABLE (
+    user_id UUID,
+    email TEXT,
+    tier TEXT,
+    active_from TIMESTAMPTZ,
+    active_until TIMESTAMPTZ,
+    cycle_allowance INTEGER,
+    cycle_used INTEGER,
+    updated_at TIMESTAMPTZ
+)
+LANGUAGE SQL
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT user_id, email, tier, active_from, active_until, cycle_allowance, cycle_used, updated_at
+    FROM user_subscriptions
+    WHERE email = lookup_email
+    LIMIT 1;
+$$;
+
+-- ============================================================
+-- Categories & Order-Categories (Team tier feature)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS categories (
+    id BIGINT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS order_categories (
+    id BIGINT PRIMARY KEY,
+    order_id BIGINT REFERENCES orders(id) ON DELETE CASCADE,
+    category_id BIGINT REFERENCES categories(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(order_id, category_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(user_id);
+CREATE INDEX IF NOT EXISTS idx_oc_order ON order_categories(order_id);
+CREATE INDEX IF NOT EXISTS idx_oc_category ON order_categories(category_id);
+
+-- RLS for categories
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users manage own categories" ON categories;
+CREATE POLICY "Users manage own categories" ON categories
+    FOR ALL USING (user_id = auth.uid());
+
+-- RLS for order_categories
+ALTER TABLE order_categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users manage own order_categories" ON order_categories;
+CREATE POLICY "Users manage own order_categories" ON order_categories
+    FOR ALL USING (
+        category_id IN (SELECT id FROM categories WHERE user_id = auth.uid())
+    );

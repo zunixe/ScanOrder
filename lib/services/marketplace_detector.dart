@@ -39,7 +39,9 @@ class MarketplaceDetector {
     }
 
     // AnterAja
-    if (upper.startsWith('AA') || upper.startsWith('ANTERAJA')) {
+    if (upper.startsWith('AA') ||
+        upper.startsWith('ANTERAJA') ||
+        RegExp(r'^11\d{12}$').hasMatch(upper)) {
       return 'AnterAja';
     }
 

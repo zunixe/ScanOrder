@@ -3,6 +3,7 @@ import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
 import '../../models/team.dart';
+import '../../models/category.dart';
 import '../../services/quota_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -14,11 +15,13 @@ class AuthProvider extends ChangeNotifier {
 
   // Team state
   Team? _currentTeam;
+  List<TeamMember> _teamMembers = [];
 
   bool get isLoggedIn => _isLoggedIn;
   bool get isLoading => _isLoading;
   String? get error => _error;
   Team? get currentTeam => _currentTeam;
+  List<TeamMember> get teamMembers => _teamMembers;
   bool get hasTeam => _currentTeam != null;
   bool get isAdmin => _currentTeam?.createdBy == _supabase.currentUser?.id;
 
@@ -49,19 +52,20 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Auto-set Pro untuk admin email
   Future<void> _checkAdminPro() async {
-    final user = _supabase.currentUser;
-    if (user?.email == 'zunixe@gmail.com') {
-      final quota = QuotaService();
-      await quota.setPro(true);
-      debugPrint('[AuthProvider] Admin Pro applied for ${user!.email}');
-    }
+    // Admin tier bypass dihapus untuk release.
+    // Gunakan Supabase dashboard atau server-side function untuk set tier admin.
   }
 
   Future<void> _loadTeam() async {
     try {
       _currentTeam = await _supabase.getMyTeam();
+      if (_currentTeam != null) {
+        final members = await _supabase.getTeamMembers(_currentTeam!.id);
+        _teamMembers = members.map((m) => TeamMember.fromMap(m)).toList();
+      } else {
+        _teamMembers = [];
+      }
     } catch (e) {
       debugPrint('Load team error: $e');
     } finally {
@@ -126,7 +130,7 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> signUp(String email, String password) async {
+  Future<void> signUp(String email, String password, {StorageTier tier = StorageTier.free}) async {
     if (_supabase.isOffline) {
       _error = 'Tidak ada koneksi ke server. Pastikan internet aktif atau server Supabase tersedia.';
       notifyListeners();
@@ -146,6 +150,11 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
       _isLoggedIn = true;
+      // Apply tier yang dipilih saat daftar
+      if (tier != StorageTier.free) {
+        await QuotaService().purchaseOrChangeTier(tier, carryOver: false);
+        debugPrint('[AuthProvider] Tier $tier applied on signup for $email');
+      }
     } catch (e) {
       _error = 'Signup gagal: $e';
     } finally {
@@ -204,6 +213,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await _supabase.signOut();
+      await QuotaService().purchaseOrChangeTier(StorageTier.free, carryOver: false);
       _isLoggedIn = false;
       _currentTeam = null;
     } finally {
@@ -219,6 +229,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> syncOnLogin() async {
     try {
+      final userId = _supabase.currentUser?.id;
       final teamId = _currentTeam?.id;
       final remote = teamId != null
           ? await _supabase.fetchTeamOrders(teamId)
@@ -234,9 +245,40 @@ class AuthProvider extends ChangeNotifier {
             date: (m['date'] ?? DateTime.now().toIso8601String().substring(0, 10)) as String,
             photoPath: m['photo_url'] as String?,
           );
-          await _db.insertOrder(o);
+          await _db.insertOrder(o, userId: userId);
         } catch (e) {
           debugPrint('Sync row error: $e');
+        }
+      }
+
+      // Sync categories from cloud
+      final remoteCats = await _supabase.fetchCategories();
+      for (final c in remoteCats) {
+        try {
+          await _db.insertCategory(ScanCategory(
+            id: c['id'] as int?,
+            name: c['name'] as String,
+            color: c['color'] as String,
+            userId: c['user_id'] as String?,
+            createdAt: c['created_at'] != null
+                ? DateTime.parse(c['created_at'] as String)
+                : DateTime.now(),
+          ));
+        } catch (e) {
+          debugPrint('Sync category error: $e');
+        }
+      }
+
+      // Sync order-category relations from cloud
+      final remoteOC = await _supabase.fetchOrderCategories();
+      for (final oc in remoteOC) {
+        try {
+          await _db.assignCategoryToOrder(
+            oc['order_id'] as int,
+            oc['category_id'] as int,
+          );
+        } catch (e) {
+          debugPrint('Sync order-category error: $e');
         }
       }
     } catch (e) {

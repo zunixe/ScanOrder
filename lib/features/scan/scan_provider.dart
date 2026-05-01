@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
+import '../../models/category.dart';
 import '../../services/marketplace_detector.dart';
 import '../../services/quota_service.dart';
 import 'package:intl/intl.dart';
@@ -31,16 +32,83 @@ class ScanProvider extends ChangeNotifier {
   ScanResult? lastResult;
   int todayCount = 0;
   int totalCount = 0;
+  int remainingScans = 0;
+  int scanLimit = 0;
+  StorageTier currentTier = StorageTier.free;
   bool _processing = false;
   bool _savePhoto = true;
 
+  // Category support (Team tier only)
+  List<ScanCategory> categories = [];
+  int? activeCategoryId;
+
   bool get savePhoto => _savePhoto;
+  String get quotaDisplay {
+    if (scanLimit < 0) return '∞';
+    return '$remainingScans/$scanLimit';
+  }
+  ScanCategory? get activeCategory {
+    if (activeCategoryId == null) return null;
+    return categories.where((c) => c.id == activeCategoryId).firstOrNull;
+  }
 
   Future<void> loadCounts() async {
+    final userId = SupabaseService().currentUser?.id;
     final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
     todayCount = await _db.getOrderCountByDate(today);
-    totalCount = await _db.getTotalOrderCount();
+    totalCount = await _db.getTotalOrderCount(userId: userId);
     _savePhoto = await _quota.getSavePhoto();
+    currentTier = await _quota.getTier();
+    scanLimit = await _quota.getScanLimit();
+    remainingScans = await _quota.getRemainingFreeScans();
+    // Load categories for Team tier
+    if (currentTier == StorageTier.unlimited) {
+      categories = await _db.getAllCategories(userId: userId);
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadCategories() async {
+    final userId = SupabaseService().currentUser?.id;
+    categories = await _db.getAllCategories(userId: userId);
+    notifyListeners();
+  }
+
+  void setActiveCategory(int? id) {
+    activeCategoryId = id;
+    notifyListeners();
+  }
+
+  Future<void> addCategory(String name, String color) async {
+    final userId = SupabaseService().currentUser?.id;
+    final category = ScanCategory(name: name, color: color, userId: userId);
+    final id = await _db.insertCategory(category);
+    categories = await _db.getAllCategories(userId: userId);
+    activeCategoryId = id;
+    // Sync to Supabase
+    Future.microtask(() => SupabaseService().upsertCategory(id, name, color));
+    notifyListeners();
+  }
+
+  Future<void> deleteCategory(int id) async {
+    await _db.deleteCategory(id);
+    if (activeCategoryId == id) activeCategoryId = null;
+    final userId = SupabaseService().currentUser?.id;
+    categories = await _db.getAllCategories(userId: userId);
+    // Sync delete to Supabase
+    Future.microtask(() => SupabaseService().deleteCategory(id));
+    notifyListeners();
+  }
+
+  Future<void> renameCategory(int id, String newName) async {
+    final userId = SupabaseService().currentUser?.id;
+    final cat = categories.where((c) => c.id == id).firstOrNull;
+    if (cat == null) return;
+    final updated = cat.copyWith(name: newName);
+    await _db.updateCategory(updated);
+    categories = await _db.getAllCategories(userId: userId);
+    // Sync to Supabase
+    Future.microtask(() => SupabaseService().upsertCategory(id, newName, cat.color));
     notifyListeners();
   }
 
@@ -63,7 +131,7 @@ class ScanProvider extends ChangeNotifier {
 
       final marketplace = MarketplaceDetector.detect(resi);
 
-      // Check duplicate
+      // Check duplicate (indexed query — fast)
       final existing = await _db.findByResi(resi);
       if (existing != null) {
         lastResult = ScanResult(
@@ -87,39 +155,30 @@ class ScanProvider extends ChangeNotifier {
         return lastResult;
       }
 
-      // Check if photo should be saved
-      final effectivePhotoPath = _savePhoto ? photoPath : null;
-      if (_savePhoto && photoPath != null) {
-        // Check storage limit before saving photo
-        final remaining = await _quota.getRemainingBytes();
-        if (remaining >= 0) {
-          try {
-            final file = File(photoPath);
-            final size = file.lengthSync();
-            if (size > remaining) {
-              debugPrint('[ScanProvider] Storage full, skipping photo');
-              photoPath = null;
-            }
-          } catch (_) {}
-        }
-      }
-
-      // Insert new
+      // Insert new order with photo
       final now = DateTime.now();
       final order = ScannedOrder(
         resi: resi,
         marketplace: marketplace,
         scannedAt: now,
         date: DateFormat('yyyy-MM-dd').format(now),
-        photoPath: effectivePhotoPath,
+        photoPath: photoPath,
       );
 
-      await _db.insertOrder(order);
+      final userId = SupabaseService().currentUser?.id;
+      final orderId = await _db.insertOrder(order, userId: userId);
+      // Assign category if active (Team tier)
+      if (activeCategoryId != null) {
+        final ocId = await _db.assignCategoryToOrder(orderId, activeCategoryId!);
+        // Sync category assignment to Supabase
+        Future.microtask(() => SupabaseService().assignOrderCategory(ocId, orderId, activeCategoryId!));
+      }
       // Jangan kurangi quota pribadi jika user anggota tim (tim = unlimited)
       if (teamId == null) await _quota.consumeScan();
+      remainingScans = await _quota.getRemainingFreeScans();
 
-      // Sync ke Supabase backend (async, tidak blocking)
-      _syncToSupabase(order, teamId: teamId);
+      // Sync ke Supabase backend (fire-and-forget, tidak blocking)
+      Future.microtask(() => _syncToSupabase(order, teamId: teamId));
 
       todayCount++;
       totalCount++;

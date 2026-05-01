@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../services/quota_service.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
+import '../contact/contact_page.dart';
 import 'subscription_provider.dart';
 
 class SubscriptionPage extends StatefulWidget {
@@ -25,10 +26,18 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
     return '$d/$m/$y';
   }
 
+  String _fmtMemberDate(DateTime dt) {
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final y = dt.year.toString();
+    return '$d/$m/$y';
+  }
+
   @override
   void initState() {
     super.initState();
     context.read<SubscriptionProvider>().loadStatus();
+    context.read<SubscriptionProvider>().initializeIap();
     // Reload subscription status when auth changes (e.g. after login)
     _authProvider = context.read<AuthProvider>();
     _authProvider.addListener(_onAuthChange);
@@ -147,12 +156,13 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                     return Card(
                       color: Colors.green.withAlpha(25),
                       child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                         leading: const CircleAvatar(
                           backgroundColor: Colors.green,
                           child: Icon(Icons.cloud_done, color: Colors.white),
                         ),
                         title: const Text('Tersambung ke Cloud'),
-                        subtitle: const Text('Data scan tersimpan di Supabase'),
+                        subtitle: const Text('Data scan tersimpan di cloud'),
                         trailing: TextButton(
                           onPressed: () => auth.signOut(),
                           child: const Text('Logout'),
@@ -163,6 +173,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                   return Card(
                     color: Colors.orange.withAlpha(25),
                     child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       leading: const CircleAvatar(
                         backgroundColor: Colors.orange,
                         child: Icon(Icons.cloud_off, color: Colors.white),
@@ -240,6 +251,28 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
               const SizedBox(height: 24),
 
+              if (provider.purchaseError != null) ...[
+                Card(
+                  color: Colors.red.withAlpha(20),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            provider.purchaseError!,
+                            style: const TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
               if (!provider.isPro) ...[
                 const Text(
                   'Pilih Paket',
@@ -297,17 +330,13 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                     'Scan resi tanpa batas',
                     'Tim & manajemen anggota',
                     'Sinkronisasi real-time',
+                    'Export XLSX (Excel)',
                     'Priority support',
                   ],
                   onTap: () => _handlePurchase(StorageTier.unlimited),
                   isPrimary: false,
                 ),
 
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => provider.restorePurchase(),
-                  child: const Text('Restore Purchase'),
-                ),
               ] else ...[
                 // Info paket aktif
                 Card(
@@ -394,26 +423,18 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 ],
               ],
 
-              // Debug toggle (remove in production)
-              const SizedBox(height: 32),
-              const Divider(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  TextButton.icon(
-                    onPressed: () => provider.toggleTierDebug(),
-                    icon: const Icon(Icons.bug_report, size: 16),
-                    label: Text(
-                      'Debug: ${provider.tierName}',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () => provider.resetQuotaDebug(),
-                    icon: const Icon(Icons.restart_alt, size: 16),
-                    label: const Text('Reset Quota', style: TextStyle(fontSize: 12)),
-                  ),
-                ],
+              const SizedBox(height: 24),
+
+              // Hubungi Kami button
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ContactPage()),
+                  );
+                },
+                icon: const Icon(Icons.contact_mail),
+                label: const Text('Hubungi Kami'),
               ),
             ],
           ),
@@ -507,6 +528,51 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                     icon: const Icon(Icons.share),
                     label: const Text('Salin Kode Invite'),
                   ),
+                  const SizedBox(height: 16),
+                  // Member list
+                  Row(
+                    children: [
+                      const Icon(Icons.people_outline, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Anggota (${auth.teamMembers.length})',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ...auth.teamMembers.map((member) => Card(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    child: ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        backgroundColor: member.role == 'admin'
+                            ? AppTheme.primaryColor
+                            : Colors.grey.shade300,
+                        radius: 18,
+                        child: Icon(
+                          member.role == 'admin' ? Icons.star : Icons.person,
+                          color: member.role == 'admin' ? Colors.white : Colors.grey.shade700,
+                          size: 18,
+                        ),
+                      ),
+                      title: Text(
+                        member.email ?? member.userId.substring(0, 8),
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      subtitle: Text(
+                        member.role == 'admin' ? 'Admin' : 'Anggota',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: member.role == 'admin' ? AppTheme.primaryColor : Colors.grey,
+                        ),
+                      ),
+                      trailing: Text(
+                        _fmtMemberDate(member.joinedAt),
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                      ),
+                    ),
+                  )),
                 ] else ...[
                   SizedBox(
                     width: double.infinity,
@@ -561,40 +627,14 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   void _handlePurchase(StorageTier tier) {
     final auth = context.read<AuthProvider>();
     if (!auth.isLoggedIn) {
-      showLoginDialog(context, onSuccess: () => _showPurchaseDialog(tier));
+      showLoginDialog(context, onSuccess: () => _startPurchase(tier));
       return;
     }
-    _showPurchaseDialog(tier);
+    _startPurchase(tier);
   }
 
-  void _showPurchaseDialog(StorageTier tier) {
-    final tierName = tier == StorageTier.basic
-        ? 'Basic'
-        : tier == StorageTier.pro
-            ? 'Pro'
-            : 'Team';
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Beli Paket $tierName'),
-        content: Text(
-          'Fitur In-App Purchase akan tersedia setelah setup di Google Play Console.\n\nUntuk testing, tekan "Beli Sekarang" untuk aktifkan paket.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () {
-              context.read<SubscriptionProvider>().purchaseTier(tier);
-              Navigator.pop(ctx);
-            },
-            child: const Text('Beli Sekarang'),
-          ),
-        ],
-      ),
-    );
+  Future<void> _startPurchase(StorageTier tier) async {
+    await context.read<SubscriptionProvider>().purchaseTier(tier);
   }
 
   void _showCreateTeamDialog(BuildContext ctx, AuthProvider auth) {
@@ -760,7 +800,7 @@ class _PricingCard extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -886,13 +926,37 @@ class _UpgradeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isBasic = currentTier == StorageTier.basic;
-    final targetTier = isBasic ? StorageTier.pro : StorageTier.unlimited;
-    final targetName = isBasic ? 'Pro' : 'Team';
-    final targetPrice = isBasic ? 'Rp 99.000' : 'Rp 399.000';
-    final targetScans = isBasic ? '5.000 scan' : 'Unlimited';
     final carryInfo = remainingScans > 0
         ? ' + $remainingScans sisa scan terbawa'
         : '';
+    final carryNote = remainingScans > 0
+        ? 'Sisa $remainingScans scan periode ini akan ditambahkan ke kuota baru.'
+        : '';
+
+    // Opsi upgrade berdasarkan tier saat ini
+    final options = isBasic
+        ? [
+            _UpgradeOption(
+              tier: StorageTier.pro,
+              name: 'Pro',
+              price: 'Rp 99.000',
+              scans: '5.000 scan/bulan$carryInfo',
+            ),
+            _UpgradeOption(
+              tier: StorageTier.unlimited,
+              name: 'Team',
+              price: 'Rp 399.000',
+              scans: 'Unlimited scan/bulan',
+            ),
+          ]
+        : [
+            _UpgradeOption(
+              tier: StorageTier.unlimited,
+              name: 'Team',
+              price: 'Rp 399.000',
+              scans: 'Unlimited scan/bulan',
+            ),
+          ];
 
     return Card(
       color: Colors.amber.withAlpha(20),
@@ -909,45 +973,52 @@ class _UpgradeCard extends StatelessWidget {
               children: [
                 const Icon(Icons.arrow_circle_up_rounded, color: Colors.amber),
                 const SizedBox(width: 8),
-                Text(
-                  'Upgrade ke $targetName',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                const Text(
+                  'Upgrade Paket',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                 ),
-                const Spacer(),
-                Text(
-                  targetPrice,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.amber.shade800,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '$targetScans/bulan$carryInfo',
-              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-            ),
-            if (remainingScans > 0) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Sisa $remainingScans scan periode ini akan ditambahkan ke kuota baru.',
-                style: TextStyle(fontSize: 11, color: Colors.amber.shade800),
-              ),
             ],
-            const SizedBox(height: 10),
-            SizedBox(
+          ),
+          if (carryNote.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(carryNote, style: TextStyle(fontSize: 11, color: Colors.amber.shade800)),
+          ],
+          const SizedBox(height: 10),
+          ...options.map((opt) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade700),
-                onPressed: () => onUpgrade(targetTier),
+                onPressed: () => onUpgrade(opt.tier),
                 icon: const Icon(Icons.upgrade),
-                label: Text('Upgrade ke $targetName'),
+                label: Text('Upgrade ke ${opt.name} — ${opt.price}'),
               ),
             ),
-          ],
-        ),
+          )),
+          ...options.map((opt) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              opt.scans,
+              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+            ),
+          )),
+        ],
       ),
-    );
+    ),
+  );
   }
+}
+
+class _UpgradeOption {
+  final StorageTier tier;
+  final String name;
+  final String price;
+  final String scans;
+  const _UpgradeOption({
+    required this.tier,
+    required this.name,
+    required this.price,
+    required this.scans,
+  });
 }
