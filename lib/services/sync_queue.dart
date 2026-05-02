@@ -201,6 +201,7 @@ class SyncQueue {
         'date': p['date'],
         'photo_url': p['photo_url'],
         'team_id': p['team_id'],
+        'scanned_by': p['scanned_by'],
       });
       // Also insert scan_categories if category_id is present (map local int -> Supabase UUID)
       final categoryId = p['category_id'];

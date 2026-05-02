@@ -461,7 +461,7 @@ class _StatsPageState extends State<StatsPage> {
                           value: '${provider.syncedCategories}',
                           total: provider.syncedCategories + provider.unsyncedCategories,
                           synced: provider.syncedCategories,
-                          icon: Icons.cloud_done_outlined,
+                          icon: Icons.label_outlined,
                         ),
                         const Divider(height: 16),
                         _SyncRow(
@@ -469,7 +469,7 @@ class _StatsPageState extends State<StatsPage> {
                           value: '${provider.unsyncedCategories}',
                           total: provider.syncedCategories + provider.unsyncedCategories,
                           synced: provider.unsyncedCategories,
-                          icon: Icons.cloud_off_outlined,
+                          icon: Icons.label_off_outlined,
                           isWarning: provider.unsyncedCategories > 0,
                         ),
                         if (provider.pendingQueueCount > 0) ...[

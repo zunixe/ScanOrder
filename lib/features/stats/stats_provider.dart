@@ -324,18 +324,18 @@ class StatsProvider extends ChangeNotifier {
       final membersData = await supabase.getTeamMembers(team.id);
       teamMembers = membersData.map((m) => TeamMember.fromMap(m)).toList();
 
-      // Get scan counts per user_id from scans table for this team
+      // Get scan counts per scanned_by from scans table for this team
       final response = await client
           .from('scans')
-          .select('user_id')
+          .select('scanned_by, user_id')
           .eq('team_id', team.id);
 
-      // Count scans per user_id
-      final userCounts = <String, int>{};
+      // Count scans per scanned_by (who actually scanned)
+      final scannerCounts = <String, int>{};
       for (final row in response) {
-        final uid = row['user_id'] as String?;
-        if (uid != null) {
-          userCounts[uid] = (userCounts[uid] ?? 0) + 1;
+        final scanner = (row['scanned_by'] as String?) ?? (row['user_id'] as String?) ?? '';
+        if (scanner.isNotEmpty) {
+          scannerCounts[scanner] = (scannerCounts[scanner] ?? 0) + 1;
         }
       }
 
@@ -343,7 +343,7 @@ class StatsProvider extends ChangeNotifier {
       final memberScanMap = <String, int>{};
       for (final m in teamMembers) {
         final email = m.email ?? m.userId.substring(0, 8);
-        memberScanMap[email] = userCounts[m.userId] ?? 0;
+        memberScanMap[email] = scannerCounts[m.userId] ?? 0;
       }
 
       memberScanStats = memberScanMap;

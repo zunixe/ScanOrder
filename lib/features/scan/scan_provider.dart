@@ -334,7 +334,7 @@ class ScanProvider extends ChangeNotifier {
         if (existingOrder != null) {
           orderId = existingOrder.id!;
         } else {
-          orderId = await _db.insertOrder(order, userId: scanOwnerId, teamId: teamId);
+          orderId = await _db.insertOrder(order, userId: scanOwnerId, teamId: teamId, scannedBy: userId);
         }
         // Assign ke kategori aktif (UNIQUE order_id, category_id mencegah duplikat dalam kategori)
         final ocId = await _db.assignCategoryToOrder(orderId, activeCategoryId!);
@@ -342,7 +342,7 @@ class ScanProvider extends ChangeNotifier {
         // Sync category assignment to Supabase via queue (reliable, with retry)
         // Don't use Future.microtask — race condition with insertOrder
       } else {
-        orderId = await _db.insertOrder(order, userId: scanOwnerId, teamId: teamId);
+        orderId = await _db.insertOrder(order, userId: scanOwnerId, teamId: teamId, scannedBy: userId);
       }
       // Jangan kurangi quota pribadi jika user anggota tim (tim = unlimited)
       if (teamId == null) await _quota.consumeScan();
@@ -398,6 +398,7 @@ class ScanProvider extends ChangeNotifier {
           'date': DateFormat('yyyy-MM-dd').format(now),
           'photo_url': photoPath, // local path, will be updated after upload
           'team_id': teamId,
+          'scanned_by': userId,
           'category_id': activeCategoryId,
         });
         debugPrint('[ScanProvider] enqueued insertOrder for resi=$resi, teamId=$teamId');

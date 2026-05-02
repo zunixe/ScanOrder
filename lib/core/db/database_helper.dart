@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -37,7 +37,8 @@ class DatabaseHelper {
         date TEXT NOT NULL,
         photo_path TEXT,
         user_id TEXT,
-        team_id TEXT
+        team_id TEXT,
+        scanned_by TEXT
       )
     ''');
     await db.execute('CREATE UNIQUE INDEX idx_resi_user ON scans(resi, user_id)');
@@ -159,13 +160,18 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE scans ADD COLUMN team_id TEXT');
       await db.execute('CREATE INDEX idx_team_id ON scans(team_id)');
     }
+    if (oldVersion < 8) {
+      // Add scanned_by column to track who actually scanned (differs from user_id for team members)
+      await db.execute('ALTER TABLE scans ADD COLUMN scanned_by TEXT');
+    }
   }
 
-  Future<int> insertOrder(ScannedOrder order, {String? userId, String? teamId}) async {
+  Future<int> insertOrder(ScannedOrder order, {String? userId, String? teamId, String? scannedBy}) async {
     final db = await database;
     final map = order.toMap();
     if (userId != null) map['user_id'] = userId;
     if (teamId != null) map['team_id'] = teamId;
+    if (scannedBy != null) map['scanned_by'] = scannedBy;
     return await db.insert(
       'scans',
       map,
