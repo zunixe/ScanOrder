@@ -566,6 +566,13 @@ class DatabaseHelper {
     await db.delete('scans', where: 'team_id IS NOT NULL');
   }
 
+  /// Get all team orders (for photo cleanup on leave)
+  Future<List<ScannedOrder>> getTeamOrders() async {
+    final db = await database;
+    final maps = await db.query('scans', where: 'team_id IS NOT NULL');
+    return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+  }
+
   /// Delete categories that belong to team admin (not personal categories)
   Future<void> deleteTeamCategories(String userId) async {
     final db = await database;

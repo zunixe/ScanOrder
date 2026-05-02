@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/order.dart';
+import '../../models/category.dart';
 import '../../models/team.dart';
 import '../db/database_helper.dart';
 
@@ -832,6 +833,36 @@ class SupabaseService {
     } catch (e) {
       debugPrint('[Supabase] fetch team categories error: $e');
       return [];
+    }
+  }
+
+  /// Sync team categories from Supabase to local DB
+  /// Syncs own categories + admin's categories (for team members only)
+  Future<void> syncTeamCategoriesToLocal({String? adminUserId}) async {
+    final db = DatabaseHelper.instance;
+    // Sync own categories
+    final ownCats = await fetchCategories();
+    for (final c in ownCats) {
+      try {
+        await db.insertCategory(ScanCategory(
+          name: c['name'] as String,
+          color: c['color'] as String,
+          userId: c['user_id'] as String?,
+        ));
+      } catch (_) {}
+    }
+    // Sync admin's categories (only for team members, not admin themselves)
+    if (adminUserId != null) {
+      final adminCats = await fetchTeamCategories(adminUserId);
+      for (final c in adminCats) {
+        try {
+          await db.insertCategory(ScanCategory(
+            name: c['name'] as String,
+            color: c['color'] as String,
+            userId: c['user_id'] as String?,
+          ));
+        } catch (_) {}
+      }
     }
   }
 

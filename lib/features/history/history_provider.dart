@@ -68,35 +68,7 @@ class HistoryProvider extends ChangeNotifier {
       }
       debugPrint('[History] loadOrders TEAM raw: ${raw.length} rows');
       if (raw.isNotEmpty) debugPrint('[History] loadOrders TEAM sample: ${raw.first}');
-      orders = raw.map((m) {
-        // Parse categories from nested scan_categories response
-        List<ScanCategory> cats = [];
-        final scList = m['scan_categories'] as List<dynamic>?;
-        if (scList != null) {
-          for (final sc in scList) {
-            final catData = sc['categories'] as Map<String, dynamic>?;
-            if (catData != null) {
-              cats.add(ScanCategory(
-                // Supabase id is UUID (String), local id is int — don't pass Supabase id here
-                name: (catData['name'] ?? '') as String,
-                color: (catData['color'] ?? '#9E9E9E') as String,
-                userId: catData['user_id'] as String?,
-              ));
-            }
-          }
-        }
-        return ScannedOrder(
-          id: m['id'] as int?,
-          resi: (m['resi'] ?? '') as String,
-          marketplace: (m['marketplace'] ?? '') as String,
-          scannedAt: m['scanned_at'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int)
-              : DateTime.now(),
-          date: (m['date'] ?? '') as String,
-          photoPath: m['photo_url'] as String?,
-          categories: cats,
-        );
-      }).toList();
+      orders = raw.map((m) => ScannedOrder.fromSupabase(m)).toList();
       debugPrint('[History] loadOrders TEAM parsed: ${orders.length} orders');
     } else {
       // Personal mode: query local DB
@@ -179,32 +151,8 @@ class HistoryProvider extends ChangeNotifier {
   Future<void> _syncTeamCategories() async {
     final sup = SupabaseService();
     final userId = sup.currentUser?.id;
-    // Sync own categories (always needed)
-    final ownCats = await sup.fetchCategories();
-    for (final c in ownCats) {
-      try {
-        await _db.insertCategory(ScanCategory(
-          // Don't pass Supabase UUID id - let local DB auto-generate integer
-          name: c['name'] as String,
-          color: c['color'] as String,
-          userId: c['user_id'] as String?,
-        ));
-      } catch (_) {}
-    }
-    // Sync admin's categories ONLY for team members (not for admin themselves)
-    if (_adminUserId != null && userId != null && _adminUserId != userId) {
-      final adminCats = await sup.fetchTeamCategories(_adminUserId!);
-      for (final c in adminCats) {
-        try {
-          await _db.insertCategory(ScanCategory(
-            // Don't pass Supabase UUID id - let local DB auto-generate integer
-            name: c['name'] as String,
-            color: c['color'] as String,
-            userId: c['user_id'] as String?,
-          ));
-        } catch (_) {}
-      }
-    }
+    final effectiveAdminId = (_adminUserId != null && userId != null && _adminUserId != userId) ? _adminUserId : null;
+    await sup.syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
   }
 
   void setFilterCategory(int? categoryId) async {
@@ -213,34 +161,7 @@ class HistoryProvider extends ChangeNotifier {
       // Team mode with category: load all team orders from Supabase,
       // then filter by matching resi with local scan_categories
       final allRaw = await SupabaseService().getTeamOrdersByDate(_teamId!, selectedDate);
-      final allOrders = allRaw.map((m) {
-        List<ScanCategory> cats = [];
-        final scList = m['scan_categories'] as List<dynamic>?;
-        if (scList != null) {
-          for (final sc in scList) {
-            final catData = sc['categories'] as Map<String, dynamic>?;
-            if (catData != null) {
-              cats.add(ScanCategory(
-                // Supabase id is UUID (String), local id is int — don't pass Supabase id here
-                name: (catData['name'] ?? '') as String,
-                color: (catData['color'] ?? '#9E9E9E') as String,
-                userId: catData['user_id'] as String?,
-              ));
-            }
-          }
-        }
-        return ScannedOrder(
-          id: m['id'] as int?,
-          resi: (m['resi'] ?? '') as String,
-          marketplace: (m['marketplace'] ?? '') as String,
-          scannedAt: m['scanned_at'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int)
-              : DateTime.now(),
-          date: (m['date'] ?? '') as String,
-          photoPath: m['photo_url'] as String?,
-          categories: cats,
-        );
-      }).toList();
+      final allOrders = allRaw.map((m) => ScannedOrder.fromSupabase(m)).toList();
 
       // Get local resis that belong to this category
       final localCatOrders = await _db.getOrdersByCategory(categoryId, userId: _userId, teamId: _teamId);
@@ -311,34 +232,7 @@ class HistoryProvider extends ChangeNotifier {
     if (_teamId != null) {
       // Team mode: fetch all from Supabase
       final raw = await SupabaseService().fetchTeamOrders(_teamId!);
-      return raw.map((m) {
-        List<ScanCategory> cats = [];
-        final scList = m['scan_categories'] as List<dynamic>?;
-        if (scList != null) {
-          for (final sc in scList) {
-            final catData = sc['categories'] as Map<String, dynamic>?;
-            if (catData != null) {
-              cats.add(ScanCategory(
-                id: catData['id'] as int?,
-                name: (catData['name'] ?? '') as String,
-                color: (catData['color'] ?? '#9E9E9E') as String,
-                userId: catData['user_id'] as String?,
-              ));
-            }
-          }
-        }
-        return ScannedOrder(
-          id: m['id'] as int?,
-          resi: (m['resi'] ?? '') as String,
-          marketplace: (m['marketplace'] ?? '') as String,
-          scannedAt: m['scanned_at'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int)
-              : DateTime.now(),
-          date: (m['date'] ?? '') as String,
-          photoPath: m['photo_url'] as String?,
-          categories: cats,
-        );
-      }).toList();
+      return raw.map((m) => ScannedOrder.fromSupabase(m)).toList();
     }
     final orders = await _db.getAllOrders(userId: _userId);
     debugPrint('[HistoryProvider] getAllForExport: userId=$_userId, orders=${orders.length}');

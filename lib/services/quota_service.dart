@@ -502,7 +502,13 @@ class QuotaService {
     if (activeUntil != null) {
       await prefs.setInt(_userKey(_cycleEndKey), DateTime.parse(activeUntil).millisecondsSinceEpoch);
     }
-    if (allowance != null) {
+    // Use correct allowance for tier if cloud value is incorrect
+    final correctAllowance = _defaultAllowanceForTier(cloudTier);
+    if (allowance != null && allowance != correctAllowance && allowance > 0) {
+      await prefs.setInt(_userKey(_cycleAllowanceKey), correctAllowance);
+      // Also fix cloud
+      _supabase.client?.from('user_subscriptions').update({'cycle_allowance': correctAllowance}).eq('user_id', _supabase.currentUser!.id);
+    } else if (allowance != null) {
       await prefs.setInt(_userKey(_cycleAllowanceKey), allowance);
     }
     if (used != null) {

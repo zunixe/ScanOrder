@@ -5,7 +5,6 @@ import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/order.dart';
 import '../../models/team.dart';
-import '../../models/category.dart';
 import '../../services/quota_service.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -200,10 +199,28 @@ class AuthProvider extends ChangeNotifier {
     try {
       final userId = _supabase.currentUser?.id;
       if (userId == null) return;
+
+      // Get photo paths of team scans before deleting them
+      final teamOrders = await _db.getTeamOrders();
+      final teamPhotoPaths = teamOrders
+          .where((o) => o.photoPath != null && !o.photoPath!.startsWith('http'))
+          .map((o) => o.photoPath!)
+          .toList();
+
       // Delete orders that belong to a team (not user's personal orders)
       await _db.deleteTeamOrders(userId);
       // Delete categories that belong to team admin (not user's personal categories)
       await _db.deleteTeamCategories(userId);
+
+      // Delete team scan photo files from storage
+      for (final path in teamPhotoPaths) {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+          debugPrint('[AuthProvider] Deleted team photo: $path');
+        }
+      }
+
       debugPrint('[AuthProvider] Cleared team data from local DB');
     } catch (e) {
       debugPrint('[AuthProvider] Clear team data error: $e');
@@ -318,15 +335,7 @@ class AuthProvider extends ChangeNotifier {
       int synced = 0;
       for (final m in remote) {
         try {
-          final o = ScannedOrder(
-            resi: (m['resi'] ?? '') as String,
-            marketplace: (m['marketplace'] ?? '') as String,
-            scannedAt: m['scanned_at'] != null
-                ? DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int)
-                : DateTime.now(),
-            date: (m['date'] ?? DateTime.now().toIso8601String().substring(0, 10)) as String,
-            photoPath: m['photo_url'] as String?,
-          );
+          final o = ScannedOrder.fromSupabase(m);
           final id = await _db.insertOrder(o, userId: userId, teamId: teamId);
           if (id > 0) {
             synced++;
@@ -347,35 +356,9 @@ class AuthProvider extends ChangeNotifier {
       // Sync photos from cloud to local
       await _syncPhotosToLocal(userId: userId);
 
-      // Sync categories from cloud (don't pass Supabase UUID id — let local DB auto-generate)
-      final remoteCats = await _supabase.fetchCategories();
-      for (final c in remoteCats) {
-        try {
-          await _db.insertCategory(ScanCategory(
-            name: c['name'] as String,
-            color: c['color'] as String,
-            userId: c['user_id'] as String?,
-          ));
-        } catch (e) {
-          debugPrint('Sync category error: $e');
-        }
-      }
-
-      // If team member, also sync admin's categories
-      if (isTeamMember && _currentTeam != null) {
-        final adminCats = await _supabase.fetchTeamCategories(_currentTeam!.createdBy);
-        for (final c in adminCats) {
-          try {
-            await _db.insertCategory(ScanCategory(
-              name: c['name'] as String,
-              color: c['color'] as String,
-              userId: c['user_id'] as String?,
-            ));
-          } catch (e) {
-            debugPrint('Sync admin category error: $e');
-          }
-        }
-      }
+      // Sync categories from cloud (own + admin's if team member)
+      final effectiveAdminId = (isTeamMember && _currentTeam != null) ? _currentTeam!.createdBy : null;
+      await _supabase.syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
 
       // Sync scan-category relations from Supabase
       // Need to map: Supabase scan_id -> local order by resi, Supabase category UUID -> local category by name+user_id

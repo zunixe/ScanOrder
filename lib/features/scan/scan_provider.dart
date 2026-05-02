@@ -123,37 +123,10 @@ class ScanProvider extends ChangeNotifier {
 
   /// Sync team categories from Supabase to local DB so they persist
   Future<void> _syncTeamCategoriesFromSupabase() async {
-    final sup = SupabaseService();
-    final userId = sup.currentUser?.id;
-    if (userId == null) return;
-
-    // Sync own categories (always needed for both admin and team members)
-    final ownCats = await sup.fetchCategories();
-    for (final c in ownCats) {
-      try {
-        await _db.insertCategory(ScanCategory(
-          // Don't pass Supabase UUID id - let local DB auto-generate integer
-          name: c['name'] as String,
-          color: c['color'] as String,
-          userId: c['user_id'] as String?,
-        ));
-      } catch (_) {}
-    }
-
-    // Sync admin's categories ONLY for team members (not for admin themselves)
-    if (_adminUserId != null && _adminUserId != userId) {
-      final adminCats = await sup.fetchTeamCategories(_adminUserId!);
-      for (final c in adminCats) {
-        try {
-          await _db.insertCategory(ScanCategory(
-            // Don't pass Supabase UUID id - let local DB auto-generate integer
-            name: c['name'] as String,
-            color: c['color'] as String,
-            userId: c['user_id'] as String?,
-          ));
-        } catch (_) {}
-      }
-    }
+    final userId = SupabaseService().currentUser?.id;
+    // Only pass adminUserId for team members (not admin themselves)
+    final effectiveAdminId = (_adminUserId != null && _adminUserId != userId) ? _adminUserId : null;
+    await SupabaseService().syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
     debugPrint('[ScanProvider] _syncTeamCategoriesFromSupabase: synced own + admin cats');
   }
 

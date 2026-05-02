@@ -41,6 +41,35 @@ class ScannedOrder {
     );
   }
 
+  /// Parse from Supabase response (with nested scan_categories)
+  factory ScannedOrder.fromSupabase(Map<String, dynamic> m) {
+    List<ScanCategory> cats = [];
+    final scList = m['scan_categories'] as List<dynamic>?;
+    if (scList != null) {
+      for (final sc in scList) {
+        final catData = sc['categories'] as Map<String, dynamic>?;
+        if (catData != null) {
+          cats.add(ScanCategory(
+            name: (catData['name'] ?? '') as String,
+            color: (catData['color'] ?? '#9E9E9E') as String,
+            userId: catData['user_id'] as String?,
+          ));
+        }
+      }
+    }
+    return ScannedOrder(
+      id: m['id'] as int?,
+      resi: (m['resi'] ?? '') as String,
+      marketplace: (m['marketplace'] ?? '') as String,
+      scannedAt: m['scanned_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(m['scanned_at'] as int)
+          : DateTime.now(),
+      date: (m['date'] ?? '') as String,
+      photoPath: m['photo_url'] as String?,
+      categories: cats,
+    );
+  }
+
   ScannedOrder copyWith({String? photoPath, List<ScanCategory>? categories}) {
     return ScannedOrder(
       id: id,
