@@ -88,7 +88,7 @@ class StatsProvider extends ChangeNotifier {
       final userId = SupabaseService().currentUser?.id;
       final teamId = _teamId;
 
-      // Database size (always full DB, but we'll proportion it later)
+      // Database size — proportional to user's data in personal mode
       final dbPath = await getDatabasesPath();
       final dbFile = File(join(dbPath, 'scanorder.db'));
       if (await dbFile.exists()) {
@@ -96,37 +96,58 @@ class StatsProvider extends ChangeNotifier {
           // Team mode: full DB size
           dbSizeBytes = await dbFile.length();
         } else {
-          // Personal mode: proportion DB size by personal scan count vs total
+          // Personal mode: proportion by user's scan count
           final totalScansCount = await _db.getTotalOrderCount();
           final personalScansCount = userId != null ? await _db.getTotalOrderCount(userId: userId) : 0;
-          final fullDbSize = await dbFile.length();
-          if (totalScansCount > 0) {
-            dbSizeBytes = (fullDbSize * personalScansCount) ~/ totalScansCount;
+          if (personalScansCount == 0) {
+            dbSizeBytes = 0;
           } else {
-            dbSizeBytes = fullDbSize;
+            final fullDbSize = await dbFile.length();
+            dbSizeBytes = totalScansCount > 0
+                ? (fullDbSize * personalScansCount) ~/ totalScansCount
+                : fullDbSize;
           }
         }
       }
 
-      // Photos size: only count photos belonging to user's own scans
+      // Photos size: count actual photo files on disk
       final docsDir = await getApplicationDocumentsDirectory();
       final dir = Directory(docsDir.path);
       if (await dir.exists()) {
-        // Get list of photo paths from personal scans
-        final personalOrders = userId != null
-            ? await _db.getAllOrders(userId: userId)
-            : <ScannedOrder>[];
-        final personalPhotoPaths = personalOrders
-            .where((o) => o.photoPath != null && !o.photoPath!.startsWith('http'))
-            .map((o) => o.photoPath!)
-            .toSet();
-
-        await for (final entity in dir.list()) {
-          if (entity is File && entity.path.contains('scan_') && entity.path.endsWith('.jpg')) {
-            if (teamId != null || personalPhotoPaths.contains(entity.path)) {
+        if (teamId != null) {
+          // Team mode: count all scan_*.jpg files
+          await for (final entity in dir.list()) {
+            if (entity is File && entity.path.contains('scan_') && entity.path.endsWith('.jpg')) {
               photoCount++;
               photoSizeBytes += await entity.length();
             }
+          }
+        } else {
+          // Personal mode: only count photos for personal scans
+          // Build set of local file paths from orders (both local paths and cloud URLs that have local files)
+          final personalOrders = userId != null
+              ? await _db.getAllOrders(userId: userId)
+              : <ScannedOrder>[];
+          final localPhotoPaths = <String>{};
+          for (final o in personalOrders) {
+            if (o.photoPath != null && o.photoPath!.isNotEmpty) {
+              if (!o.photoPath!.startsWith('http')) {
+                // Local path — check if file exists
+                if (File(o.photoPath!).existsSync()) {
+                  localPhotoPaths.add(o.photoPath!);
+                }
+              } else {
+                // Cloud URL — check if local file exists (downloaded from cloud)
+                final localFile = File('${docsDir.path}/scan_${o.scannedAt.millisecondsSinceEpoch}.jpg');
+                if (await localFile.exists()) {
+                  localPhotoPaths.add(localFile.path);
+                }
+              }
+            }
+          }
+          for (final path in localPhotoPaths) {
+            photoCount++;
+            photoSizeBytes += await File(path).length();
           }
         }
       }
@@ -209,9 +230,11 @@ class StatsProvider extends ChangeNotifier {
       }
       cloudPhotoSizeBytes = cloudPhotoBytes;
 
-      // Estimasi ukuran DB cloud: proporsi data sync × ukuran DB lokal
-      if (total > 0 && syncedScans > 0) {
+      // Estimasi ukuran DB cloud: proporsi data sync × ukuran DB lokal (user's portion)
+      if (dbSizeBytes > 0 && total > 0 && syncedScans > 0) {
         cloudDbSizeBytes = (dbSizeBytes * syncedScans) ~/ total;
+      } else {
+        cloudDbSizeBytes = 0;
       }
 
       syncedPhotos = cloudPhotos;

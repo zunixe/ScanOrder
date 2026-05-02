@@ -178,15 +178,26 @@ class QuotaService {
   Future<void> _autoRollFreeCycleIfNeeded() async {
     await _ensureCycleInitialized();
     final tier = await getTier();
-    if (tier != StorageTier.free) return;
+    final active = await isSubscriptionActive();
+    // Only roll for free-tier users or expired subscription users
+    if (tier != StorageTier.free && active) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final endMs = prefs.getInt(_userKey(_cycleEndKey)) ?? 0;
-    if (DateTime.now().millisecondsSinceEpoch <= endMs) return;
-
+    final startMs = prefs.getInt(_userKey(_cycleStartKey)) ?? 0;
     final now = DateTime.now();
-    await prefs.setInt(_userKey(_cycleStartKey), now.millisecondsSinceEpoch);
-    await prefs.setInt(_userKey(_cycleEndKey), now.add(const Duration(days: _cycleDays)).millisecondsSinceEpoch);
+
+    // Free cycle refreshes on the 1st of each month
+    final cycleStart = DateTime.fromMillisecondsSinceEpoch(startMs);
+    final needsRoll = now.year > cycleStart.year ||
+        (now.year == cycleStart.year && now.month > cycleStart.month);
+
+    if (!needsRoll) return;
+
+    // Reset on 1st of current month
+    final newStart = DateTime(now.year, now.month, 1);
+    final newEnd = DateTime(now.year, now.month + 1, 1);
+    await prefs.setInt(_userKey(_cycleStartKey), newStart.millisecondsSinceEpoch);
+    await prefs.setInt(_userKey(_cycleEndKey), newEnd.millisecondsSinceEpoch);
     await prefs.setInt(_userKey(_cycleAllowanceKey), _freeScans);
     await prefs.setInt(_userKey(_cycleUsedKey), 0);
   }
@@ -195,7 +206,14 @@ class QuotaService {
     await _autoRollFreeCycleIfNeeded();
     final tier = await getTier();
     final active = await isSubscriptionActive();
-    if (tier != StorageTier.free && !active) return false;
+
+    // If subscription expired, fall back to free quota (100/month)
+    if (tier != StorageTier.free && !active) {
+      // Allow scanning with free-tier quota as fallback
+      final freeAllowance = _freeScans;
+      final used = await getUsedInCurrentCycle();
+      return used < freeAllowance;
+    }
 
     final allowance = await getCycleAllowance();
     final used = await getUsedInCurrentCycle();
@@ -321,6 +339,13 @@ class QuotaService {
   }
 
   Future<int> getRemainingFreeScans() async {
+    final tier = await getTier();
+    final active = await isSubscriptionActive();
+    // If subscription expired, use free quota as limit
+    if (tier != StorageTier.free && !active) {
+      final used = await getUsedInCurrentCycle();
+      return (_freeScans - used).clamp(0, _freeScans);
+    }
     final allowance = await getCycleAllowance();
     final used = await getUsedInCurrentCycle();
     if (allowance < 0) return -1;
@@ -328,6 +353,9 @@ class QuotaService {
   }
 
   Future<int> getScanLimit() async {
+    final tier = await getTier();
+    final active = await isSubscriptionActive();
+    if (tier != StorageTier.free && !active) return _freeScans;
     return getCycleAllowance();
   }
 

@@ -144,34 +144,20 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     try {
       if (isAdmin) {
-        // Admin leaving: transfer or dissolve
         if (_teamMembers.length > 1) {
-          // Find oldest non-admin member to transfer to
-          final nextAdmin = _teamMembers
-              .where((m) => m.role != 'admin')
-              .fold<TeamMember?>(null, (best, m) {
-            if (best == null || m.joinedAt.isBefore(best.joinedAt)) return m;
-            return best;
-          });
-          if (nextAdmin != null) {
-            // Transfer admin role
-            final ok = await _supabase.transferAdmin(_currentTeam!.id, nextAdmin.userId);
-            if (!ok) {
-              _error = 'Gagal transfer admin. Coba lagi.';
-              _isLoading = false;
-              notifyListeners();
-              return;
-            }
-          }
-        } else {
-          // Admin is the only member — dissolve team
-          final ok = await _supabase.dissolveTeam(_currentTeam!.id);
-          if (!ok) {
-            _error = 'Gagal membubarkan tim. Coba lagi.';
-            _isLoading = false;
-            notifyListeners();
-            return;
-          }
+          // Admin cannot leave while there are still members
+          _error = 'Keluarkan semua anggota tim terlebih dahulu sebelum keluar.';
+          _isLoading = false;
+          notifyListeners();
+          return;
+        }
+        // Admin is the only member — dissolve team
+        final ok = await _supabase.dissolveTeam(_currentTeam!.id);
+        if (!ok) {
+          _error = 'Gagal membubarkan tim. Coba lagi.';
+          _isLoading = false;
+          notifyListeners();
+          return;
         }
       } else {
         // Regular member leaving

@@ -249,7 +249,7 @@ class _PrivacyPolicyContent extends StatelessWidget {
         _DocumentItem(
           icon: Icons.storage_outlined,
           title: 'Data yang Disimpan',
-          subtitle: 'Email akun, data scan/resi, kategori, riwayat, informasi tim, dan preferensi aplikasi.',
+          subtitle: 'Email akun, data scan/resi, foto bukti scan, kategori, riwayat, informasi tim, dan preferensi aplikasi.',
         ),
         _DocumentItem(
           icon: Icons.sync_outlined,
@@ -259,7 +259,7 @@ class _PrivacyPolicyContent extends StatelessWidget {
         _DocumentItem(
           icon: Icons.verified_user_outlined,
           title: 'Keamanan',
-          subtitle: 'Data cloud disimpan melalui Supabase dengan aturan akses pengguna. Data tidak dijual ke pihak lain.',
+          subtitle: 'Data cloud disimpan dengan enkripsi dan aturan akses pengguna. Data tidak dijual ke pihak lain.',
         ),
         _DocumentItem(
           icon: Icons.phone_android_outlined,

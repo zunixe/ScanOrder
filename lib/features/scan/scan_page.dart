@@ -323,12 +323,17 @@ class _ScanPageState extends State<ScanPage> {
   }
 
   void _showQuotaDialog() {
+    final auth = context.read<AuthProvider>();
+    final isExpired = auth.isLoggedIn;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Kuota Habis'),
-        content: const Text(
-          'Kuota scan periode ini sudah habis atau paket sudah tidak aktif.\nPerpanjang / upgrade paket untuk lanjut scan.',
+        title: Text(isExpired ? 'Langganan Habis' : 'Kuota Habis'),
+        content: Text(
+          isExpired
+              ? 'Langganan Anda sudah berakhir. Perpanjang paket untuk lanjut scan dan sinkronisasi ke cloud.'
+              : 'Kuota scan periode ini sudah habis.\nUpgrade paket untuk kuota lebih banyak.',
         ),
         actions: [
           TextButton(
@@ -338,10 +343,9 @@ class _ScanPageState extends State<ScanPage> {
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
-              // Navigate to subscription page
               DefaultTabController.of(context).animateTo(3);
             },
-            child: const Text('Upgrade Pro'),
+            child: Text(isExpired ? 'Perpanjang Paket' : 'Upgrade Pro'),
           ),
         ],
       ),
