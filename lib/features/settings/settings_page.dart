@@ -133,14 +133,31 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _showAboutDialog() {
-    showAboutDialog(
+    showDialog(
       context: context,
-      applicationName: 'ScanOrder',
-      applicationVersion: _appVersion,
-      applicationIcon: const Icon(Icons.qr_code_scanner, size: 48, color: AppTheme.primaryColor),
-      children: [
-        const Text('Aplikasi scan & kelola nomor resi pengiriman.'),
-      ],
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_scanner, size: 32, color: AppTheme.primaryColor),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('ScanOrder', style: TextStyle(fontSize: 18)),
+                Text('v$_appVersion', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              ],
+            ),
+          ],
+        ),
+        content: const Text('Aplikasi scan & kelola nomor resi pengiriman.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
   }
 
