@@ -39,6 +39,9 @@ class StatsProvider extends ChangeNotifier {
   int syncedCategories = 0;
   int unsyncedCategories = 0;
 
+  // Unsynced photo resi list
+  List<String> unsyncedPhotoResis = [];
+
   // Team stats
   Map<String, int> memberScanStats = {}; // email -> scan count
   List<TeamMember> teamMembers = [];
@@ -152,11 +155,11 @@ class StatsProvider extends ChangeNotifier {
       final response = teamId != null
           ? await client
               .from('scans')
-              .select('id, photo_url')
+              .select('id, photo_url, resi')
               .eq('team_id', teamId)
           : await client
               .from('scans')
-              .select('id, photo_url')
+              .select('id, photo_url, resi')
               .eq('user_id', userId);
       syncedScans = response.length;
       unsyncedScans = total - syncedScans;
@@ -213,6 +216,28 @@ class StatsProvider extends ChangeNotifier {
 
       syncedPhotos = cloudPhotos;
       unsyncedPhotos = localOnlyPhotos + unsyncedScans; // foto di cloud masih path + foto yang order belum sync
+
+      // Collect unsynced photo resi list
+      final unsyncedResis = <String>[];
+      // Orders not synced to cloud at all
+      if (unsyncedScans > 0) {
+        final localOrders = await _db.getAllOrders(userId: userId);
+        final cloudResis = (response as List).map((r) => r['resi'] as String?).where((r) => r != null).toSet();
+        for (final o in localOrders) {
+          if (!cloudResis.contains(o.resi) && o.photoPath != null && o.photoPath!.isNotEmpty) {
+            unsyncedResis.add(o.resi);
+          }
+        }
+      }
+      // Orders in cloud but photo not uploaded (photo_url is local path)
+      for (final row in response) {
+        final photoUrl = row['photo_url'] as String?;
+        final resi = row['resi'] as String?;
+        if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http') && resi != null) {
+          unsyncedResis.add(resi);
+        }
+      }
+      unsyncedPhotoResis = unsyncedResis;
 
       // Pending queue count
       pendingQueueCount = await _syncQueue.pendingCount;

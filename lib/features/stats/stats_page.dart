@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -443,13 +444,16 @@ class _StatsPageState extends State<StatsPage> {
                           icon: Icons.cloud_done_outlined,
                         ),
                         const Divider(height: 16),
-                        _SyncRow(
-                          label: 'Foto Belum Sinkron',
-                          value: '${provider.unsyncedPhotos}',
-                          total: provider.syncedPhotos + provider.unsyncedPhotos,
-                          synced: provider.unsyncedPhotos,
-                          icon: Icons.photo_library_outlined,
-                          isWarning: provider.unsyncedPhotos > 0,
+                        GestureDetector(
+                          onTap: provider.unsyncedPhotos > 0 ? () => _showUnsyncedPhotoDialog(context, provider) : null,
+                          child: _SyncRow(
+                            label: 'Foto Belum Sinkron',
+                            value: '${provider.unsyncedPhotos}',
+                            total: provider.syncedPhotos + provider.unsyncedPhotos,
+                            synced: provider.unsyncedPhotos,
+                            icon: Icons.photo_library_outlined,
+                            isWarning: provider.unsyncedPhotos > 0,
+                          ),
                         ),
                         const Divider(height: 16),
                         _SyncRow(
@@ -536,6 +540,74 @@ class _StatsPageState extends State<StatsPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showUnsyncedPhotoDialog(BuildContext context, StatsProvider provider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.photo_library_outlined, color: Colors.orange, size: 20),
+            const SizedBox(width: 8),
+            const Text('Foto Belum Sinkron', style: TextStyle(fontSize: 16)),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: provider.unsyncedPhotoResis.isEmpty
+              ? const Text('Tidak ada data')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: provider.unsyncedPhotoResis.length,
+                  itemBuilder: (_, i) {
+                    final resi = provider.unsyncedPhotoResis[i];
+                    return ListTile(
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 0),
+                      leading: Icon(Icons.receipt_long, size: 18, color: Colors.orange.shade700),
+                      title: Text(resi, style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.copy, size: 18),
+                        tooltip: 'Salin',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: resi));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Disalin: $resi'),
+                              duration: const Duration(seconds: 1),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          if (provider.unsyncedPhotoResis.length > 1)
+            TextButton(
+              onPressed: () {
+                final all = provider.unsyncedPhotoResis.join('\n');
+                Clipboard.setData(ClipboardData(text: all));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('${provider.unsyncedPhotoResis.length} resi disalin'),
+                    duration: const Duration(seconds: 1),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              child: const Text('Salin Semua'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Tutup'),
+          ),
+        ],
       ),
     );
   }
