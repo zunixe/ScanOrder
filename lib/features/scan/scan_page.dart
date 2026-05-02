@@ -7,10 +7,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:image/image.dart' as img;
 import '../../core/theme.dart';
 import '../../features/auth/auth_provider.dart';
 import '../../models/category.dart';
 import '../../services/quota_service.dart';
+import '../settings/settings_provider.dart';
 import 'scan_provider.dart';
 
 class ScanPage extends StatefulWidget {
@@ -41,6 +43,11 @@ class _ScanPageState extends State<ScanPage> {
       returnImage: true,
       formats: [BarcodeFormat.code128, BarcodeFormat.code39, BarcodeFormat.code93, BarcodeFormat.ean13, BarcodeFormat.qrCode],
     );
+    final auth = context.read<AuthProvider>();
+    final team = auth.currentTeam;
+    final teamId = team?.id;
+    final adminUserId = auth.isAdmin ? null : team?.createdBy;
+    context.read<ScanProvider>().setTeamContext(teamId, adminUserId);
     context.read<ScanProvider>().loadCounts();
   }
 
@@ -127,7 +134,20 @@ class _ScanPageState extends State<ScanPage> {
         final dir = await getApplicationDocumentsDirectory();
         final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
         final file = File('${dir.path}/$fileName');
-        await file.writeAsBytes(capture.image!);
+        final compress = context.read<SettingsProvider>().compressPhoto;
+        if (compress) {
+          // Compress: resize max 1280px, quality 80%
+          final image = img.decodeImage(capture.image!);
+          if (image != null) {
+            final resized = img.copyResize(image, width: image.width > image.height ? 1280 : null, height: image.height >= image.width ? 1280 : null);
+            final compressed = img.encodeJpg(resized, quality: 80);
+            await file.writeAsBytes(compressed);
+          } else {
+            await file.writeAsBytes(capture.image!);
+          }
+        } else {
+          await file.writeAsBytes(capture.image!);
+        }
         photoPath = file.path;
       } catch (_) {
         photoPath = null;
@@ -329,12 +349,16 @@ class _ScanPageState extends State<ScanPage> {
   }
 
   void _showNoCategoryDialog() {
+    final provider = context.read<ScanProvider>();
+    final hasCategories = provider.categories.isNotEmpty;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Buat Kategori Dulu'),
-        content: const Text(
-          'Untuk mulai scan, buat kategori terlebih dahulu dengan tombol + di bawah.',
+        title: Text(hasCategories ? 'Pilih Kategori Dulu' : 'Buat Kategori Dulu'),
+        content: Text(
+          hasCategories
+              ? 'Untuk mulai scan tim, pilih kategori terlebih dahulu dengan mengetuk chip kategori di bawah.'
+              : 'Untuk mulai scan tim, kategori harus ada terlebih dahulu. Minta admin membuat kategori dengan tombol +.',
         ),
         actions: [
           TextButton(
@@ -465,6 +489,8 @@ class _ScanPageState extends State<ScanPage> {
   }
 
   void _showCategoryOptions(BuildContext context, ScanCategory cat) {
+    final auth = context.read<AuthProvider>();
+    final isReadOnly = auth.isTeamMember;
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -491,40 +517,47 @@ class _ScanPageState extends State<ScanPage> {
                 ],
               ),
             ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('Rename'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showRenameCategoryDialog(context, cat);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Hapus', style: TextStyle(color: Colors.red)),
-              subtitle: const Text('Semua scan dalam kategori ini akan ikut terhapus'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final confirm = await showDialog<bool>(
-                  context: context,
-                  builder: (dCtx) => AlertDialog(
-                    title: Text('Hapus "${cat.name}"?'),
-                    content: const Text('Semua scan dalam kategori ini juga akan dihapus. Tindakan ini tidak bisa dibatalkan.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
-                      TextButton(
-                        onPressed: () => Navigator.pop(dCtx, true),
-                        child: const Text('Hapus', style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirm == true && context.mounted) {
-                  context.read<ScanProvider>().deleteCategory(cat.id!);
-                }
-              },
-            ),
+            if (isReadOnly) ...[
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Kategori dibuat oleh admin tim. Hanya admin yang bisa mengedit.', style: TextStyle(color: Colors.grey, fontSize: 13)),
+              ),
+            ] else ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Rename'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showRenameCategoryDialog(context, cat);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Hapus', style: TextStyle(color: Colors.red)),
+                subtitle: const Text('Semua scan dalam kategori ini akan ikut terhapus'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (dCtx) => AlertDialog(
+                      title: Text('Hapus "${cat.name}"?'),
+                      content: const Text('Semua scan dalam kategori ini juga akan dihapus. Tindakan ini tidak bisa dibatalkan.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Batal')),
+                        TextButton(
+                          onPressed: () => Navigator.pop(dCtx, true),
+                          child: const Text('Hapus', style: TextStyle(color: Colors.red)),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true && context.mounted) {
+                    context.read<ScanProvider>().deleteCategory(cat.id!);
+                  }
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -597,8 +630,10 @@ class _ScanPageState extends State<ScanPage> {
                   ],
                 ),
               ),
-              child: Consumer<ScanProvider>(
-                builder: (_, provider, _) => Row(
+              child: Consumer2<ScanProvider, AuthProvider>(
+                builder: (_, provider, auth, _) {
+                  final isTeamMember = auth.isTeamMember;
+                  return Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Column(
@@ -620,16 +655,29 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          'Sisa: ${provider.quotaDisplay}',
-                          style: TextStyle(
-                            color: provider.remainingScans <= 10 && provider.scanLimit > 0
-                                ? Colors.orangeAccent
-                                : Colors.white70,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                        if (isTeamMember)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.withValues(alpha: 0.7),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Anggota Tim',
+                              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          )
+                        else if (provider.scanLimit >= 0)
+                          Text(
+                            'Sisa: ${provider.quotaDisplay}',
+                            style: TextStyle(
+                              color: provider.remainingScans <= 10 && provider.scanLimit > 0
+                                  ? Colors.orangeAccent
+                                  : Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                     Row(
@@ -689,7 +737,8 @@ class _ScanPageState extends State<ScanPage> {
                       ],
                     ),
                   ],
-                ),
+                );
+                },
               ),
             ),
           ),
@@ -699,9 +748,10 @@ class _ScanPageState extends State<ScanPage> {
             left: 12,
             right: 70,
             bottom: MediaQuery.of(context).padding.bottom + 20,
-            child: Consumer<ScanProvider>(
-              builder: (_, provider, _) {
-                if (provider.currentTier != StorageTier.unlimited) {
+            child: Consumer2<ScanProvider, AuthProvider>(
+              builder: (_, provider, auth, _) {
+                final isTeamUser = provider.currentTier == StorageTier.unlimited || auth.hasTeam;
+                if (!isTeamUser) {
                   return const SizedBox.shrink();
                 }
                 return Container(
@@ -768,7 +818,8 @@ class _ScanPageState extends State<ScanPage> {
                             ),
                           );
                         }),
-                        // Add category button
+                        // Add category button (admin only)
+                        if (!auth.isTeamMember)
                         Padding(
                           padding: const EdgeInsets.only(right: 6),
                           child: GestureDetector(

@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -36,7 +36,8 @@ class DatabaseHelper {
         scanned_at INTEGER NOT NULL,
         date TEXT NOT NULL,
         photo_path TEXT,
-        user_id TEXT
+        user_id TEXT,
+        team_id TEXT
       )
     ''');
     await db.execute('CREATE UNIQUE INDEX idx_resi_user ON scans(resi, user_id)');
@@ -153,17 +154,30 @@ class DatabaseHelper {
       ''');
       await db.execute('DROP TABLE scan_categories_old');
     }
+    if (oldVersion < 7) {
+      // Add team_id column to scans for team data filtering
+      await db.execute('ALTER TABLE scans ADD COLUMN team_id TEXT');
+      await db.execute('CREATE INDEX idx_team_id ON scans(team_id)');
+    }
   }
 
-  Future<int> insertOrder(ScannedOrder order, {String? userId}) async {
+  Future<int> insertOrder(ScannedOrder order, {String? userId, String? teamId}) async {
     final db = await database;
     final map = order.toMap();
     if (userId != null) map['user_id'] = userId;
+    if (teamId != null) map['team_id'] = teamId;
     return await db.insert(
       'scans',
       map,
       conflictAlgorithm: ConflictAlgorithm.ignore,
     );
+  }
+
+  Future<ScannedOrder?> getOrderById(int id) async {
+    final db = await database;
+    final maps = await db.query('scans', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (maps.isEmpty) return null;
+    return ScannedOrder.fromMap(maps.first);
   }
 
   Future<ScannedOrder?> findByResi(String resi, {String? userId}) async {
@@ -188,23 +202,17 @@ class DatabaseHelper {
     return ScannedOrder.fromMap(maps.first);
   }
 
-  Future<List<ScannedOrder>> getOrdersByDate(String date, {String? userId}) async {
+  Future<List<ScannedOrder>> getOrdersByDate(String date, {String? userId, String? teamId}) async {
     final db = await database;
-    if (userId != null) {
-      final maps = await db.query(
-        'scans',
-        where: 'date = ? AND user_id = ?',
-        whereArgs: [date, userId],
-        orderBy: 'scanned_at DESC',
-      );
+    if (teamId != null) {
+      final maps = await db.query('scans', where: 'date = ? AND team_id = ?', whereArgs: [date, teamId], orderBy: 'scanned_at DESC');
       return maps.map((m) => ScannedOrder.fromMap(m)).toList();
     }
-    final maps = await db.query(
-      'scans',
-      where: 'date = ? AND user_id IS NULL',
-      whereArgs: [date],
-      orderBy: 'scanned_at DESC',
-    );
+    if (userId != null) {
+      final maps = await db.query('scans', where: 'date = ? AND user_id = ?', whereArgs: [date, userId], orderBy: 'scanned_at DESC');
+      return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+    }
+    final maps = await db.query('scans', where: 'date = ? AND user_id IS NULL', whereArgs: [date], orderBy: 'scanned_at DESC');
     return maps.map((m) => ScannedOrder.fromMap(m)).toList();
   }
 
@@ -218,55 +226,59 @@ class DatabaseHelper {
     );
   }
 
-  Future<List<ScannedOrder>> searchOrders(String query, {String? userId}) async {
+  Future<List<ScannedOrder>> searchOrders(String query, {String? userId, String? teamId}) async {
     final db = await database;
-    if (userId != null) {
-      final maps = await db.query(
-        'scans',
-        where: 'resi LIKE ? AND user_id = ?',
-        whereArgs: ['%$query%', userId],
-        orderBy: 'scanned_at DESC',
-        limit: 100,
-      );
+    if (teamId != null) {
+      final maps = await db.query('scans', where: 'resi LIKE ? AND team_id = ?', whereArgs: ['%$query%', teamId], orderBy: 'scanned_at DESC', limit: 100);
       return maps.map((m) => ScannedOrder.fromMap(m)).toList();
     }
-    final maps = await db.query(
-      'scans',
-      where: 'resi LIKE ? AND user_id IS NULL',
-      whereArgs: ['%$query%'],
-      orderBy: 'scanned_at DESC',
-      limit: 100,
-    );
+    if (userId != null) {
+      final maps = await db.query('scans', where: 'resi LIKE ? AND user_id = ?', whereArgs: ['%$query%', userId], orderBy: 'scanned_at DESC', limit: 100);
+      return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+    }
+    final maps = await db.query('scans', where: 'resi LIKE ? AND user_id IS NULL', whereArgs: ['%$query%'], orderBy: 'scanned_at DESC', limit: 100);
     return maps.map((m) => ScannedOrder.fromMap(m)).toList();
   }
 
-  Future<int> getTotalOrderCount({String? userId}) async {
+  Future<int> getTotalOrderCount({String? userId, String? teamId}) async {
     final db = await database;
-    if (userId != null) {
-      final result = await db.rawQuery('SELECT COUNT(*) as count FROM scans WHERE user_id = ?', [userId]);
+    if (teamId != null) {
+      final result = await db.rawQuery('SELECT COUNT(*) as count FROM scans WHERE team_id = ?', [teamId]);
       return Sqflite.firstIntValue(result) ?? 0;
     }
-    final result = await db.rawQuery('SELECT COUNT(*) as count FROM scans WHERE user_id IS NULL');
+    if (userId != null) {
+      // Personal mode: only count scans without team_id
+      final result = await db.rawQuery('SELECT COUNT(*) as count FROM scans WHERE user_id = ? AND team_id IS NULL', [userId]);
+      return Sqflite.firstIntValue(result) ?? 0;
+    }
+    final result = await db.rawQuery('SELECT COUNT(*) as count FROM scans WHERE user_id IS NULL AND team_id IS NULL');
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  Future<int> getOrderCountByDate(String date, {String? userId}) async {
+  Future<int> getOrderCountByDate(String date, {String? userId, String? teamId}) async {
     final db = await database;
+    if (teamId != null) {
+      final result = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM scans WHERE date = ? AND team_id = ?',
+        [date, teamId],
+      );
+      return Sqflite.firstIntValue(result) ?? 0;
+    }
     if (userId != null) {
       final result = await db.rawQuery(
-        'SELECT COUNT(*) as count FROM scans WHERE date = ? AND user_id = ?',
+        'SELECT COUNT(*) as count FROM scans WHERE date = ? AND user_id = ? AND team_id IS NULL',
         [date, userId],
       );
       return Sqflite.firstIntValue(result) ?? 0;
     }
     final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM scans WHERE date = ? AND user_id IS NULL',
+      'SELECT COUNT(*) as count FROM scans WHERE date = ? AND user_id IS NULL AND team_id IS NULL',
       [date],
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  Future<Map<String, int>> getDailyStats(int days, {String? userId}) async {
+  Future<Map<String, int>> getDailyStats(int days, {String? userId, String? teamId}) async {
     final db = await database;
     final now = DateTime.now();
     final startDate = now.subtract(Duration(days: days - 1));
@@ -275,11 +287,14 @@ class DatabaseHelper {
 
     String query = 'SELECT date, COUNT(*) as count FROM scans WHERE date >= ?';
     List<Object?> args = [startStr];
-    if (userId != null) {
-      query += ' AND user_id = ?';
+    if (teamId != null) {
+      query += ' AND team_id = ?';
+      args.add(teamId);
+    } else if (userId != null) {
+      query += ' AND user_id = ? AND team_id IS NULL';
       args.add(userId);
     } else {
-      query += ' AND user_id IS NULL';
+      query += ' AND user_id IS NULL AND team_id IS NULL';
     }
     query += ' GROUP BY date ORDER BY date ASC';
 
@@ -292,7 +307,7 @@ class DatabaseHelper {
     return stats;
   }
 
-  Future<Map<String, int>> getMarketplaceStats({String? date, String? userId}) async {
+  Future<Map<String, int>> getMarketplaceStats({String? date, String? userId, String? teamId}) async {
     final db = await database;
     String query =
         'SELECT marketplace, COUNT(*) as count FROM scans';
@@ -303,11 +318,16 @@ class DatabaseHelper {
       conditions.add('date = ?');
       args.add(date);
     }
-    if (userId != null) {
+    if (teamId != null) {
+      conditions.add('team_id = ?');
+      args.add(teamId);
+    } else if (userId != null) {
       conditions.add('user_id = ?');
       args.add(userId);
+      conditions.add('team_id IS NULL');
     } else {
       conditions.add('user_id IS NULL');
+      conditions.add('team_id IS NULL');
     }
     if (conditions.isNotEmpty) {
       query += ' WHERE ${conditions.join(' AND ')}';
@@ -326,9 +346,9 @@ class DatabaseHelper {
     final db = await database;
     List<Map<String, Object?>> maps;
     if (userId != null) {
-      maps = await db.query('scans', where: 'user_id = ?', whereArgs: [userId], orderBy: 'scanned_at DESC');
+      maps = await db.query('scans', where: 'user_id = ? AND team_id IS NULL', whereArgs: [userId], orderBy: 'scanned_at DESC');
     } else {
-      maps = await db.query('scans', where: 'user_id IS NULL', orderBy: 'scanned_at DESC');
+      maps = await db.query('scans', where: 'user_id IS NULL AND team_id IS NULL', orderBy: 'scanned_at DESC');
     }
     return maps.map((m) => ScannedOrder.fromMap(m)).toList();
   }
@@ -338,18 +358,17 @@ class DatabaseHelper {
     return await db.delete('scans', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<String>> getDistinctDates({String? userId}) async {
+  Future<List<String>> getDistinctDates({String? userId, String? teamId}) async {
     final db = await database;
-    if (userId != null) {
-      final result = await db.rawQuery(
-        'SELECT DISTINCT date FROM scans WHERE user_id = ? ORDER BY date DESC',
-        [userId],
-      );
+    if (teamId != null) {
+      final result = await db.rawQuery('SELECT DISTINCT date FROM scans WHERE team_id = ? ORDER BY date DESC', [teamId]);
       return result.map((r) => r['date'] as String).toList();
     }
-    final result = await db.rawQuery(
-      'SELECT DISTINCT date FROM scans WHERE user_id IS NULL ORDER BY date DESC',
-    );
+    if (userId != null) {
+      final result = await db.rawQuery('SELECT DISTINCT date FROM scans WHERE user_id = ? ORDER BY date DESC', [userId]);
+      return result.map((r) => r['date'] as String).toList();
+    }
+    final result = await db.rawQuery('SELECT DISTINCT date FROM scans WHERE user_id IS NULL ORDER BY date DESC');
     return result.map((r) => r['date'] as String).toList();
   }
 
@@ -357,13 +376,34 @@ class DatabaseHelper {
 
   Future<int> insertCategory(ScanCategory category) async {
     final db = await database;
+    // Check if category with same name+user_id already exists (prevent duplicates from sync)
+    final existing = await db.query(
+      'categories',
+      where: 'name = ? AND (user_id = ? OR (? IS NULL AND user_id IS NULL))',
+      whereArgs: [category.name, category.userId, category.userId],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) {
+      // Already exists, return existing id
+      return existing.first['id'] as int;
+    }
     return await db.insert('categories', category.toMap(), conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
-  Future<List<ScanCategory>> getAllCategories({String? userId}) async {
+  Future<ScanCategory?> getCategoryById(int id) async {
+    final db = await database;
+    final maps = await db.query('categories', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (maps.isEmpty) return null;
+    return ScanCategory.fromMap(maps.first);
+  }
+
+  Future<List<ScanCategory>> getAllCategories({String? userId, String? adminUserId}) async {
     final db = await database;
     List<Map<String, Object?>> maps;
-    if (userId != null) {
+    if (userId != null && adminUserId != null) {
+      // Team member: load own + admin's categories
+      maps = await db.query('categories', where: 'user_id = ? OR user_id = ?', whereArgs: [userId, adminUserId], orderBy: 'created_at ASC');
+    } else if (userId != null) {
       maps = await db.query('categories', where: 'user_id = ?', whereArgs: [userId], orderBy: 'created_at ASC');
     } else {
       maps = await db.query('categories', where: 'user_id IS NULL', orderBy: 'created_at ASC');
@@ -420,29 +460,43 @@ class DatabaseHelper {
     return result.map((m) => ScanCategory.fromMap(m)).toList();
   }
 
-  Future<List<ScannedOrder>> getOrdersByCategory(int categoryId, {String? userId}) async {
+  Future<List<ScannedOrder>> getOrdersByCategory(int categoryId, {String? userId, String? teamId}) async {
     final db = await database;
-    String userFilter = userId != null ? 'AND o.user_id = ?' : 'AND o.user_id IS NULL';
-    List<Object?> args = userId != null ? [categoryId, userId] : [categoryId];
+    String filter = teamId != null ? 'AND o.team_id = ?' : (userId != null ? 'AND o.user_id = ?' : 'AND o.user_id IS NULL');
+    List<Object?> args = teamId != null ? [categoryId, teamId] : (userId != null ? [categoryId, userId] : [categoryId]);
     final result = await db.rawQuery('''
       SELECT o.* FROM scans o
       INNER JOIN scan_categories sc ON o.id = sc.scan_id
-      WHERE sc.category_id = ? $userFilter
+      WHERE sc.category_id = ? $filter
       ORDER BY o.scanned_at DESC
     ''', args);
     return result.map((m) => ScannedOrder.fromMap(m)).toList();
   }
 
-  Future<Map<String, int>> getCategoryStats({String? userId}) async {
+  Future<Map<String, int>> getCategoryStats({String? userId, String? teamId}) async {
     final db = await database;
-    String userFilter = userId != null ? 'AND o.user_id = ?' : 'AND o.user_id IS NULL';
-    List<Object?> args = userId != null ? [userId, userId] : [];
+    List<Object?> args;
+    String catFilter;
+    String scanFilter;
+    if (teamId != null) {
+      catFilter = 'c.user_id IS NOT NULL';
+      scanFilter = 'AND o.team_id = ?';
+      args = [teamId];
+    } else if (userId != null) {
+      catFilter = 'c.user_id = ?';
+      scanFilter = 'AND o.user_id = ? AND o.team_id IS NULL';
+      args = [userId, userId];
+    } else {
+      catFilter = 'c.user_id IS NULL';
+      scanFilter = 'AND o.user_id IS NULL AND o.team_id IS NULL';
+      args = [];
+    }
     final result = await db.rawQuery('''
       SELECT c.name, COUNT(sc.scan_id) as count
       FROM categories c
       LEFT JOIN scan_categories sc ON c.id = sc.category_id
       LEFT JOIN scans o ON sc.scan_id = o.id
-      WHERE c.user_id ${userId != null ? '= ?' : 'IS NULL'} $userFilter
+      WHERE $catFilter $scanFilter
       GROUP BY c.id
       ORDER BY count DESC
     ''', args);
@@ -489,5 +543,51 @@ class DatabaseHelper {
       counts[row['cat_id'] as int] = (row['cnt'] as int?) ?? 0;
     }
     return counts;
+  }
+
+  /// Get all scan_categories with resi for repair sync to Supabase
+  Future<List<Map<String, dynamic>>> getAllScanCategoriesWithResi() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT sc.scan_id, sc.category_id, o.resi, c.name as cat_name, c.user_id as cat_user_id
+      FROM scan_categories sc
+      INNER JOIN scans o ON sc.scan_id = o.id
+      INNER JOIN categories c ON sc.category_id = c.id
+    ''');
+  }
+
+  /// Delete orders that were synced from a team (not personal orders)
+  /// Team orders have team_id set — all belong to admin
+  Future<void> deleteTeamOrders(String userId) async {
+    final db = await database;
+    // Delete scan_categories for all team orders first (foreign key)
+    await db.delete('scan_categories', where: 'scan_id IN (SELECT id FROM scans WHERE team_id IS NOT NULL)');
+    // Delete all team scans (they belong to admin, not personal)
+    await db.delete('scans', where: 'team_id IS NOT NULL');
+  }
+
+  /// Delete categories that belong to team admin (not personal categories)
+  Future<void> deleteTeamCategories(String userId) async {
+    final db = await database;
+    // Delete scan_categories references first
+    await db.delete('scan_categories', where: 'category_id IN (SELECT id FROM categories WHERE user_id != ?)', whereArgs: [userId]);
+    // Delete categories from other users (team admin)
+    await db.delete('categories', where: 'user_id != ?', whereArgs: [userId]);
+  }
+
+  /// Delete all scans and scan_categories (debug)
+  Future<void> deleteAllScans() async {
+    final db = await database;
+    await db.delete('scan_categories');
+    await db.delete('scans');
+  }
+
+  /// Update team_id for existing orders that don't have one yet (backfill on team join)
+  Future<void> updateTeamIdForUser(String userId, String teamId) async {
+    final db = await database;
+    await db.rawUpdate(
+      'UPDATE scans SET team_id = ? WHERE user_id = ? AND team_id IS NULL',
+      [teamId, userId],
+    );
   }
 }

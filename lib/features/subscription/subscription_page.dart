@@ -192,6 +192,112 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
               const SizedBox(height: 16),
 
+              if (provider.currentTier == StorageTier.pro) ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.workspace_premium, color: Colors.amber),
+                            SizedBox(width: 8),
+                            Text(
+                              'Fitur Paket Pro',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _FeatureRow(
+                          icon: Icons.qr_code_scanner,
+                          title: '5.000 Scan / Bulan',
+                          subtitle: 'Kuota scan besar untuk kebutuhan profesional.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.group_add_outlined,
+                          title: 'Gabung Tim',
+                          subtitle: 'Bisa bergabung ke tim yang sudah ada via kode invite.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.cloud_sync_outlined,
+                          title: 'Backup & Sync Cloud',
+                          subtitle: 'Data scan tersimpan lokal dan bisa disinkronkan ke cloud.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.file_download_outlined,
+                          title: 'Export Riwayat',
+                          subtitle: 'Export data scan ke XLSX/CSV untuk kebutuhan laporan.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.copy_all_outlined,
+                          title: 'Copy Resi Cepat',
+                          subtitle: 'Nomor resi di riwayat bisa disalin dengan mudah.',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              if (provider.currentTier == StorageTier.basic) ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.bolt, color: Colors.blue),
+                            SizedBox(width: 8),
+                            Text(
+                              'Fitur Paket Basic',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _FeatureRow(
+                          icon: Icons.qr_code_scanner,
+                          title: '1.000 Scan / Bulan',
+                          subtitle: 'Kuota scan untuk kebutuhan harian.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.group_add_outlined,
+                          title: 'Gabung Tim',
+                          subtitle: 'Bisa bergabung ke tim yang sudah ada via kode invite.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.cloud_sync_outlined,
+                          title: 'Backup & Sync Cloud',
+                          subtitle: 'Data scan tersimpan lokal dan bisa disinkronkan ke cloud.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.file_download_outlined,
+                          title: 'Export Riwayat',
+                          subtitle: 'Export data scan ke XLSX/CSV untuk kebutuhan laporan.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.copy_all_outlined,
+                          title: 'Copy Resi Cepat',
+                          subtitle: 'Nomor resi di riwayat bisa disalin dengan mudah.',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               if (provider.currentTier == StorageTier.unlimited) ...[
                 Card(
                   child: Padding(
@@ -242,6 +348,11 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                           icon: Icons.copy_all_outlined,
                           title: 'Copy Resi Cepat',
                           subtitle: 'Nomor resi di riwayat bisa disalin dengan mudah.',
+                        ),
+                        _FeatureRow(
+                          icon: Icons.support_agent,
+                          title: 'Dukungan Prioritas',
+                          subtitle: 'Mendapat prioritas dalam bantuan dan pemecahan masalah.',
                         ),
                       ],
                     ),

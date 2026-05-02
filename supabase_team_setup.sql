@@ -1,7 +1,13 @@
 -- ============================================================
--- SUPABASE FULL SETUP (v4 — dari awal, tabel renamed)
+-- SUPABASE FULL SETUP (v5 — updated 2025-05)
 -- Jalankan semua query ini di Supabase Dashboard → SQL Editor
--- Tabel: orders→scans, order_categories→scan_categories
+--
+-- Changelog dari v4 ke v5:
+-- - Tambah policy "Team members can read admin categories" di categories
+-- - Tambah policy "Team members can read team scan_categories" di scan_categories
+-- - Update seed data packages (hapus info storage, tambah Dukungan prioritas untuk Team)
+-- - Tambah tabel contact_messages
+-- - Tambah SQL migrasi: backfill team_id pada scans lama milik anggota tim
 -- ============================================================
 
 -- ============================================================
@@ -129,12 +135,12 @@ CREATE TABLE IF NOT EXISTS packages (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed data paket
+-- Seed data paket (v5: tanpa info storage, Team tambah Dukungan prioritas)
 INSERT INTO packages (id, name, price, scan_limit, max_members, features, is_popular, sort_order) VALUES
-    ('free',      'Free',  0,       100, 1,  ARRAY['Scan resi dasar','100 scan/bulan','1 perangkat','100MB penyimpanan'], false, 1),
-    ('basic',     'Basic', 29000,   1000, 1,  ARRAY['1000 scan/bulan','1 perangkat','2GB penyimpanan','Export CSV'], false, 2),
-    ('pro',       'Pro',   99000,   5000, 1,  ARRAY['5000 scan/bulan','1 perangkat','10GB penyimpanan','Export CSV & Excel','Foto bukti scan','Dukungan prioritas'], true, 3),
-    ('unlimited', 'Team',  399000,  0,   10, ARRAY['Scan unlimited','Hingga 10 anggota tim','Dashboard tim','Kategori order','Laporan tim','Penyimpanan unlimited'], false, 4)
+    ('free',      'Free',  0,       100,  1,  ARRAY['Scan resi barcode','100 scan/bulan','Copy resi cepat'], false, 1),
+    ('basic',     'Basic', 29000,   1000, 1,  ARRAY['1000 scan/bulan','Backup & sync cloud','Export CSV','Copy resi cepat'], false, 2),
+    ('pro',       'Pro',   99000,   5000, 1,  ARRAY['5000 scan/bulan','Backup & sync cloud','Export XLSX/CSV','Foto bukti scan','Statistik lengkap','Copy resi cepat'], true, 3),
+    ('unlimited', 'Team',  399000,  0,    10, ARRAY['Unlimited scan/bulan','Buat & kelola tim','Hingga 10 anggota tim','Kategori wajib per scan','Backup & sync cloud','Export XLSX/CSV','Foto bukti scan','Statistik lengkap','Copy resi cepat','Dukungan prioritas'], false, 4)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     price = EXCLUDED.price,
@@ -206,12 +212,17 @@ CREATE POLICY "scans_select"
 DROP POLICY IF EXISTS "scans_insert" ON scans;
 CREATE POLICY "scans_insert"
     ON scans FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
+    WITH CHECK (auth.uid() = user_id OR team_id IN (SELECT get_my_team_ids()));
 
 DROP POLICY IF EXISTS "scans_delete" ON scans;
 CREATE POLICY "scans_delete"
     ON scans FOR DELETE
     USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "scans_update" ON scans;
+CREATE POLICY "scans_update"
+    ON scans FOR UPDATE
+    USING (auth.uid() = user_id OR team_id IN (SELECT get_my_team_ids()));
 
 DROP POLICY IF EXISTS "scans_anon_select" ON scans;
 CREATE POLICY "scans_anon_select"
@@ -313,6 +324,18 @@ DROP POLICY IF EXISTS "Users manage own categories" ON categories;
 CREATE POLICY "Users manage own categories" ON categories
     FOR ALL USING (user_id = auth.uid());
 
+-- v5: anggota tim bisa baca kategori milik admin tim mereka
+DROP POLICY IF EXISTS "Team members can read admin categories" ON categories;
+CREATE POLICY "Team members can read admin categories"
+    ON categories FOR SELECT
+    USING (
+        user_id IN (
+            SELECT t.created_by FROM teams t
+            INNER JOIN team_members tm ON tm.team_id = t.id
+            WHERE tm.user_id = auth.uid()
+        )
+    );
+
 DROP POLICY IF EXISTS "categories_anon_select" ON categories;
 CREATE POLICY "categories_anon_select"
     ON categories FOR SELECT TO anon
@@ -326,6 +349,38 @@ DROP POLICY IF EXISTS "Users manage own scan_categories" ON scan_categories;
 CREATE POLICY "Users manage own scan_categories" ON scan_categories
     FOR ALL USING (
         category_id IN (SELECT id FROM categories WHERE user_id = auth.uid())
+    );
+
+-- v5: anggota tim bisa baca scan_categories untuk scan yang ada di tim mereka
+DROP POLICY IF EXISTS "Team members can read team scan_categories" ON scan_categories;
+CREATE POLICY "Team members can read team scan_categories"
+    ON scan_categories FOR SELECT
+    USING (
+        scan_id IN (
+            SELECT id FROM scans WHERE team_id IN (SELECT get_my_team_ids())
+        )
+    );
+
+-- v5: team members can insert scan_categories for scans in their team
+DROP POLICY IF EXISTS "Team members can insert team scan_categories" ON scan_categories;
+CREATE POLICY "Team members can insert team scan_categories"
+    ON scan_categories FOR INSERT
+    WITH CHECK (
+        scan_id IN (
+            SELECT id FROM scans WHERE team_id IN (SELECT get_my_team_ids())
+        )
+    );
+
+-- v5: team admin can insert scan_categories for their team scans
+DROP POLICY IF EXISTS "Team admin can insert team scan_categories" ON scan_categories;
+CREATE POLICY "Team admin can insert team scan_categories"
+    ON scan_categories FOR INSERT
+    WITH CHECK (
+        scan_id IN (
+            SELECT id FROM scans WHERE team_id IN (
+                SELECT id FROM teams WHERE created_by = auth.uid()
+            )
+        )
     );
 
 DROP POLICY IF EXISTS "scan_categories_anon_select" ON scan_categories;
@@ -366,5 +421,49 @@ CREATE INDEX IF NOT EXISTS idx_sc_order ON scan_categories(scan_id);
 CREATE INDEX IF NOT EXISTS idx_sc_category ON scan_categories(category_id);
 
 -- ============================================================
--- SELESAI — semua tabel, RLS, policies, indexes, dan seed data
+-- 18. TABLE: contact_messages
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS contact_messages (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    message TEXT NOT NULL,
+    sent_via_email BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE contact_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow read contact_messages" ON contact_messages;
+CREATE POLICY "Allow read contact_messages" ON contact_messages
+    FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow insert contact_messages" ON contact_messages;
+CREATE POLICY "Allow insert contact_messages" ON contact_messages
+    FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "No update delete contact_messages" ON contact_messages;
+CREATE POLICY "No update delete contact_messages" ON contact_messages
+    FOR UPDATE USING (false) WITH CHECK (false);
+
+DROP POLICY IF EXISTS "No delete contact_messages" ON contact_messages;
+CREATE POLICY "No delete contact_messages" ON contact_messages
+    FOR DELETE USING (false);
+
+-- ============================================================
+-- 19. MIGRASI DATA: backfill team_id pada scans lama
+-- Jalankan ini jika sudah ada data scan sebelum kolom team_id ditambahkan
+-- ============================================================
+
+-- Update team_id untuk semua scan milik anggota tim yang belum punya team_id
+UPDATE scans s
+SET team_id = tm.team_id
+FROM team_members tm
+WHERE s.user_id = tm.user_id::text::uuid
+  AND s.team_id IS NULL;
+
+-- ============================================================
+-- SELESAI v5 — semua tabel, RLS, policies, indexes, seed data,
+-- contact_messages, dan migrasi team_id
 -- ============================================================

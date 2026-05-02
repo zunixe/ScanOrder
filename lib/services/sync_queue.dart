@@ -1,11 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../core/supabase/supabase_service.dart';
+import '../core/db/database_helper.dart';
 
 /// Task yang perlu di-sync ke Supabase
-enum SyncTaskType { insertOrder, uploadPhoto, syncSubscription }
+enum SyncTaskType { insertOrder, uploadPhoto, syncSubscription, insertOrderCategory }
 
 class SyncTask {
   final String id;
@@ -54,21 +56,11 @@ class SyncTask {
   );
 
   static String _encodePayload(Map<String, dynamic> p) =>
-      p.entries.map((e) => '${e.key}=${e.value ?? ''}').join('|');
+      jsonEncode(p);
 
   static Map<String, dynamic> _decodePayload(String raw) {
-    // Simple decode: we store structured data as JSON-like string
-    // For complex payloads we use a helper
     try {
-      final map = <String, dynamic>{};
-      // Parse key=value pairs separated by |
-      for (final pair in raw.split('|')) {
-        final parts = pair.split('=');
-        if (parts.length == 2) {
-          map[parts[0]] = parts[1];
-        }
-      }
-      return map;
+      return Map<String, dynamic>.from(jsonDecode(raw));
     } catch (_) {
       return {};
     }
@@ -176,6 +168,9 @@ class SyncQueue {
         case SyncTaskType.syncSubscription:
           success = await _processSyncSubscription(task);
           break;
+        case SyncTaskType.insertOrderCategory:
+          success = await _processInsertOrderCategory(task);
+          break;
       }
     } catch (e) {
       debugPrint('[SyncQueue] Task ${task.id} error: $e');
@@ -207,9 +202,104 @@ class SyncQueue {
         'photo_url': p['photo_url'],
         'team_id': p['team_id'],
       });
+      // Also insert scan_categories if category_id is present (map local int -> Supabase UUID)
+      final categoryId = p['category_id'];
+      if (categoryId != null) {
+        try {
+          // Find Supabase scan id by resi
+          final rows = await client.from('scans').select('id').eq('resi', p['resi']).limit(1);
+          final rowList = List<Map<String, dynamic>>.from(rows);
+          if (rowList.isNotEmpty) {
+            final scanId = rowList.first['id'];
+            // Resolve Supabase category UUID by local category name + owner
+            final localCat = await DatabaseHelper.instance.getCategoryById(categoryId as int);
+            if (localCat != null) {
+              final ownerUserId = localCat.userId ?? SupabaseService().currentUser?.id;
+              if (ownerUserId == null) {
+                debugPrint('[SyncQueue] insertOrder: cannot resolve ownerUserId for category ${localCat.name}');
+                return true; // do not fail the whole task
+              }
+              final catRows = await client
+                  .from('categories')
+                  .select('id')
+                  .eq('user_id', ownerUserId)
+                  .eq('name', localCat.name)
+                  .limit(1);
+              final catList = List<Map<String, dynamic>>.from(catRows);
+              if (catList.isNotEmpty) {
+                final catUuid = catList.first['id'];
+                debugPrint('[SyncQueue] insertOrder: inserting scan_categories scan_id=$scanId, category_uuid=$catUuid (from local id=$categoryId)');
+                await client.from('scan_categories').insert({
+                  'scan_id': scanId,
+                  'category_id': catUuid,
+                });
+                debugPrint('[SyncQueue] insertOrder: scan_categories inserted OK');
+              } else {
+                debugPrint('[SyncQueue] insertOrder: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
+              }
+            } else {
+              debugPrint('[SyncQueue] insertOrder: local category not found id=$categoryId');
+            }
+          }
+        } catch (e2) {
+          debugPrint('[SyncQueue] insertOrder: scan_categories error: $e2');
+        }
+      }
       return true;
     } catch (e) {
       debugPrint('[SyncQueue] insertOrder error: $e');
+      return false;
+    }
+  }
+
+  /// Insert relation into scan_categories using resi lookup to get scan_id.
+  /// If the scan row hasn't been inserted yet, this will return false to retry later.
+  Future<bool> _processInsertOrderCategory(SyncTask task) async {
+    final client = _supabase.client;
+    if (client == null) return false;
+
+    final p = task.payload;
+    final resi = p['resi'] as String?;
+    final categoryId = p['category_id'];
+    if (resi == null || categoryId == null) return false;
+
+    try {
+      // Find scan id by resi
+      final rows = await client.from('scans').select('id').eq('resi', resi).limit(1) as List<dynamic>;
+      if (rows.isNotEmpty) {
+        final scanId = rows.first['id'];
+        // Resolve Supabase category UUID by local category name + owner
+        final localCat = await DatabaseHelper.instance.getCategoryById(categoryId as int);
+        if (localCat == null) {
+          debugPrint('[SyncQueue] insertOrderCategory: local category not found id=$categoryId');
+          return false;
+        }
+        final ownerUserId = localCat.userId ?? SupabaseService().currentUser?.id;
+        if (ownerUserId == null) {
+          debugPrint('[SyncQueue] insertOrderCategory: cannot resolve ownerUserId for category ${localCat.name}');
+          return false;
+        }
+        final catRows = await client
+            .from('categories')
+            .select('id')
+            .eq('user_id', ownerUserId)
+            .eq('name', localCat.name)
+            .limit(1) as List<dynamic>;
+        if (catRows.isEmpty) {
+          debugPrint('[SyncQueue] insertOrderCategory: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
+          return false;
+        }
+        final catUuid = catRows.first['id'];
+        await client.from('scan_categories').upsert({
+          'scan_id': scanId,
+          'category_id': catUuid,
+        });
+        return true;
+      }
+      // Scan not found yet, retry later
+      return false;
+    } catch (e) {
+      debugPrint('[SyncQueue] insertOrderCategory error: $e');
       return false;
     }
   }
@@ -233,7 +323,7 @@ class SyncQueue {
 
     final url = await _supabase.uploadPhoto(file, fileName);
     if (url != null) {
-      // Update photo_url di orders table (Supabase)
+      // Update photo_url di Supabase scans table
       final client = _supabase.client;
       if (client != null && p['resi'] != null) {
         try {
@@ -241,7 +331,25 @@ class SyncQueue {
               .from('scans')
               .update({'photo_url': url})
               .eq('resi', p['resi'] as String);
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[SyncQueue] Update photo_url in Supabase error: $e');
+          // Don't mark as success — retry later
+          return false;
+        }
+      }
+      // Update photo_path di DB lokal ke cloud URL
+      try {
+        final dbHelper = DatabaseHelper.instance;
+        final orders = await dbHelper.getAllOrders(userId: userId);
+        for (final o in orders) {
+          if (o.photoPath == localPath && o.id != null) {
+            await dbHelper.updateOrderPhoto(o.id!, url);
+            debugPrint('[SyncQueue] Updated local photo_path to cloud URL for resi=${o.resi}');
+            break;
+          }
+        }
+      } catch (e) {
+        debugPrint('[SyncQueue] Update local photo_path error: $e');
       }
       return true;
     }
@@ -335,6 +443,15 @@ class SyncQueue {
     }
   }
 
+  /// Process any pending tasks in the queue (call on app start)
+  Future<void> processPending() async {
+    final count = await pendingCount;
+    if (count > 0) {
+      debugPrint('[SyncQueue] Processing $count pending tasks on startup');
+      _tryProcess();
+    }
+  }
+
   /// Get/create the queue database
   Future<Database> _getQueueDb() async {
     final dbPath = await getDatabasesPath();
@@ -370,6 +487,6 @@ class SyncQueue {
 
   /// Encode payload to storable string format
   String _encodePayload(Map<String, dynamic> p) {
-    return p.entries.map((e) => '${e.key}=${e.value}').join('|');
+    return jsonEncode(p);
   }
 }

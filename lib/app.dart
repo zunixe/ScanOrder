@@ -86,10 +86,23 @@ class _MainShellState extends State<MainShell> {
 
   void _syncUserId(AuthProvider auth) {
     final userId = SupabaseService().currentUser?.id;
+    final team = auth.currentTeam;
+    final isAdmin = auth.isAdmin;
+    final teamId = team?.id;
+    final adminUserId = isAdmin ? null : team?.createdBy;
+    debugPrint('[App] _syncUserId: userId=$userId, teamId=$teamId, isAdmin=$isAdmin, adminUserId=$adminUserId');
     context.read<HistoryProvider>().setUserId(userId);
+    context.read<HistoryProvider>().setTeamContext(teamId, adminUserId);
     context.read<HistoryProvider>().refresh();
+    context.read<ScanProvider>().setTeamContext(teamId, adminUserId);
     context.read<ScanProvider>().loadCounts();
+    context.read<StatsProvider>().setTeamContext(teamId, adminUserId);
+    context.read<StatsProvider>().loadStats();
     context.read<SubscriptionProvider>().loadStatus();
+    // Repair scan_categories in Supabase for team users (admin has local data)
+    if (teamId != null) {
+      SupabaseService().repairScanCategories();
+    }
   }
 
   @override

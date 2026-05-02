@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
+import '../../core/db/database_helper.dart';
+import '../../core/supabase/supabase_service.dart';
 import '../../services/quota_service.dart';
+import '../../services/sync_queue.dart';
+import '../auth/auth_provider.dart';
 import '../subscription/subscription_page.dart';
 import '../subscription/subscription_provider.dart';
 import 'stats_provider.dart';
@@ -23,6 +28,13 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload stats when page becomes visible (e.g. after leaving team)
+    context.read<StatsProvider>().loadStats();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final sub = context.watch<SubscriptionProvider>();
     final isFree = sub.currentTier == StorageTier.free;
@@ -31,8 +43,8 @@ class _StatsPageState extends State<StatsPage> {
       appBar: AppBar(
         title: const Text('Statistik'),
       ),
-      body: Consumer<StatsProvider>(
-        builder: (_, provider, _) => SingleChildScrollView(
+      body: Consumer2<StatsProvider, AuthProvider>(
+        builder: (_, provider, auth, _) => SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -64,56 +76,6 @@ class _StatsPageState extends State<StatsPage> {
                 const SizedBox(height: 24),
                 _buildLockedSection(context),
               ] else ...[
-                const SizedBox(height: 24),
-
-                // Storage usage card
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.storage,
-                              color: AppTheme.primaryColor,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Penyimpanan',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        _StorageRow(
-                          label: 'Database',
-                          value: provider.formattedDbSize,
-                          icon: Icons.dataset_outlined,
-                        ),
-                        const Divider(height: 16),
-                        _StorageRow(
-                          label: 'Foto (${provider.photoCount})',
-                          value: provider.formattedPhotoSize,
-                          icon: Icons.photo_library_outlined,
-                        ),
-                        const Divider(height: 16),
-                        _StorageRow(
-                          label: 'Total',
-                          value: provider.formattedTotalSize,
-                          icon: Icons.folder_outlined,
-                          isBold: true,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
                 const SizedBox(height: 24),
 
                 // Period selector + bar chart
@@ -190,15 +152,82 @@ class _StatsPageState extends State<StatsPage> {
                   ),
                 ],
 
-                // Category breakdown (Team tier only)
-                if (provider.categoryStats.isNotEmpty) ...[
+                // Team member scan stats (Team users only)
+                if ((sub.currentTier == StorageTier.unlimited || auth!.isTeamMember) && provider.memberScanStats.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   const Text(
-                    'Kategori',
+                    'Scan per Anggota Tim',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
+                          ...provider.memberScanStats.entries.map((e) {
+                            final total = provider.memberScanStats.values.fold(0, (a, b) => a + b);
+                            final pct = total > 0 ? e.value / total : 0.0;
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          e.key,
+                                          style: const TextStyle(fontSize: 13),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${e.value} scan',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: pct,
+                                      minHeight: 6,
+                                      backgroundColor: Colors.grey.shade200,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                // Category chart (all tiers with categories)
+                if (provider.categoryStats.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Analisa per Kategori',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 180,
+                    child: _CategoryPieChart(stats: provider.categoryStats),
                   ),
                   const SizedBox(height: 12),
                   ...provider.categoryStats.entries.map(
@@ -206,6 +235,300 @@ class _StatsPageState extends State<StatsPage> {
                       name: e.key,
                       count: e.value,
                       total: provider.totalScans,
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                // Storage usage card
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.storage,
+                              color: AppTheme.primaryColor,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Penyimpanan',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Table(
+                          columnWidths: const {
+                            0: FlexColumnWidth(1.2),
+                            1: FlexColumnWidth(1),
+                            2: FlexColumnWidth(1),
+                          },
+                          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                          children: [
+                            // Header
+                            TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text('', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text('Lokal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Text('Cloud', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
+                                ),
+                              ],
+                            ),
+                            // Database row
+                            TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.dataset_outlined, size: 16, color: Colors.grey),
+                                      const SizedBox(width: 6),
+                                      Text('Database', style: TextStyle(fontSize: 13)),
+                                    ],
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Text(
+                                    '${provider.formattedDbSize}\n${provider.totalScans} data',
+                                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Text(
+                                    '${provider.formattedCloudDbSize}\n${provider.syncedScans} data',
+                                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Foto row
+                            TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.photo_library_outlined, size: 16, color: Colors.grey),
+                                      const SizedBox(width: 6),
+                                      Text('Foto', style: TextStyle(fontSize: 13)),
+                                    ],
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Text(
+                                    '${provider.formattedPhotoSize}\n${provider.photoCount} foto',
+                                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: Text(
+                                    '${provider.formattedCloudPhotoSize}\n${provider.syncedPhotos} foto',
+                                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // Total row
+                            TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.folder_outlined, size: 16, color: AppTheme.primaryColor),
+                                      const SizedBox(width: 6),
+                                      Text('Total', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    provider.formattedTotalSize,
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    '${provider.formattedCloudTotalSize}\n${provider.syncedScans + provider.syncedPhotos} item',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Sync status card
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.cloud_sync_outlined,
+                              color: AppTheme.primaryColor,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Status Sync',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _SyncRow(
+                          label: 'Data Scan Tersinkron',
+                          value: '${provider.syncedScans}',
+                          total: provider.totalScans,
+                          synced: provider.syncedScans,
+                          icon: Icons.dataset_outlined,
+                        ),
+                        const Divider(height: 16),
+                        _SyncRow(
+                          label: 'Data Scan Belum Sinkron',
+                          value: '${provider.unsyncedScans}',
+                          total: provider.totalScans,
+                          synced: provider.unsyncedScans,
+                          icon: Icons.cloud_off_outlined,
+                          isWarning: provider.unsyncedScans > 0,
+                        ),
+                        const Divider(height: 16),
+                        _SyncRow(
+                          label: 'Foto Tersinkron ke Cloud',
+                          value: '${provider.syncedPhotos}',
+                          total: provider.syncedPhotos + provider.unsyncedPhotos,
+                          synced: provider.syncedPhotos,
+                          icon: Icons.cloud_done_outlined,
+                        ),
+                        const Divider(height: 16),
+                        _SyncRow(
+                          label: 'Foto Belum Sinkron',
+                          value: '${provider.unsyncedPhotos}',
+                          total: provider.syncedPhotos + provider.unsyncedPhotos,
+                          synced: provider.unsyncedPhotos,
+                          icon: Icons.photo_library_outlined,
+                          isWarning: provider.unsyncedPhotos > 0,
+                        ),
+                        const Divider(height: 16),
+                        _SyncRow(
+                          label: 'Kategori Tersinkron ke Cloud',
+                          value: '${provider.syncedCategories}',
+                          total: provider.syncedCategories + provider.unsyncedCategories,
+                          synced: provider.syncedCategories,
+                          icon: Icons.cloud_done_outlined,
+                        ),
+                        const Divider(height: 16),
+                        _SyncRow(
+                          label: 'Kategori Belum Sinkron',
+                          value: '${provider.unsyncedCategories}',
+                          total: provider.syncedCategories + provider.unsyncedCategories,
+                          synced: provider.unsyncedCategories,
+                          icon: Icons.cloud_off_outlined,
+                          isWarning: provider.unsyncedCategories > 0,
+                        ),
+                        if (provider.pendingQueueCount > 0) ...[
+                          const Divider(height: 16),
+                          Row(
+                            children: [
+                              Icon(Icons.schedule, size: 18, color: Colors.orange),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Antrian Sync: ${provider.pendingQueueCount} task',
+                                  style: TextStyle(fontSize: 13, color: Colors.orange.shade800),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Manual sync button
+                if (provider.unsyncedScans > 0 || provider.unsyncedPhotos > 0) ...[
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        // Re-enqueue unsynced photos
+                        final db = DatabaseHelper.instance;
+                        final userId = SupabaseService().currentUser?.id;
+                        final syncQueue = SyncQueue();
+                        if (userId != null) {
+                          final orders = await db.getAllOrders(userId: userId);
+                          for (final o in orders) {
+                            if (o.photoPath != null &&
+                                o.photoPath!.isNotEmpty &&
+                                !o.photoPath!.startsWith('http') &&
+                                File(o.photoPath!).existsSync()) {
+                              syncQueue.enqueue(SyncTaskType.uploadPhoto, {
+                                'local_path': o.photoPath,
+                                'user_id': userId,
+                                'resi': o.resi,
+                                'cloud_filename': '$userId/${o.scannedAt.millisecondsSinceEpoch}.jpg',
+                              });
+                            }
+                          }
+                        }
+                        await syncQueue.processPending();
+                        await provider.loadStats();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Sync selesai'),
+                              duration: Duration(seconds: 2),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Sync Sekarang'),
                     ),
                   ),
                 ],
@@ -452,49 +775,6 @@ class _MarketplacePieChart extends StatelessWidget {
   }
 }
 
-class _StorageRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final bool isBold;
-
-  const _StorageRow({
-    required this.label,
-    required this.value,
-    required this.icon,
-    this.isBold = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: Colors.grey),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-            color: isBold
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _MarketplaceRow extends StatelessWidget {
   final String name;
   final int count;
@@ -611,6 +891,117 @@ class _CategoryRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CategoryPieChart extends StatelessWidget {
+  final Map<String, int> stats;
+  const _CategoryPieChart({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = stats.values.fold<int>(0, (a, b) => a + b);
+    if (total == 0) return const SizedBox.shrink();
+
+    final categoryColors = [
+      AppTheme.primaryColor,
+      Colors.teal,
+      Colors.orange,
+      Colors.purple,
+      Colors.pink,
+      Colors.indigo,
+      Colors.brown,
+      Colors.cyan,
+    ];
+
+    final sections = stats.entries.toList().asMap().entries.map((indexed) {
+      final i = indexed.key;
+      final e = indexed.value;
+      final pct = (e.value / total * 100);
+      final color = categoryColors[i % categoryColors.length];
+      return PieChartSectionData(
+        value: e.value.toDouble(),
+        color: color,
+        title: pct >= 8 ? '${pct.toStringAsFixed(0)}%' : '',
+        titleStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+        radius: 50,
+      );
+    }).toList();
+
+    return PieChart(
+      PieChartData(
+        sections: sections,
+        centerSpaceRadius: 30,
+        sectionsSpace: 2,
+      ),
+    );
+  }
+}
+
+class _SyncRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final int total;
+  final int synced;
+  final IconData icon;
+  final bool isWarning;
+
+  const _SyncRow({
+    required this.label,
+    required this.value,
+    required this.total,
+    required this.synced,
+    required this.icon,
+    this.isWarning = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total > 0 ? synced / total : 0.0;
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: isWarning ? Colors.orange : Colors.grey),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isWarning ? FontWeight.w600 : FontWeight.normal,
+                  color: isWarning ? Colors.orange.shade800 : null,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: pct.clamp(0.0, 1.0),
+                  backgroundColor: Colors.grey[200],
+                  color: isWarning ? Colors.orange : AppTheme.successColor,
+                  minHeight: 6,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: isWarning ? Colors.orange.shade800 : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }

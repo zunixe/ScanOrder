@@ -56,10 +56,10 @@ class QuotaService {
 
   // Hardcoded fallback packages (dipakai jika DB tidak bisa diakses)
   static const List<PackageInfo> _fallbackPackages = [
-    PackageInfo(id: 'free',      name: 'Free',  price: 0,      scanLimit: 100,  maxMembers: 1,  features: ['Scan resi dasar','100 scan/bulan','1 perangkat','100MB penyimpanan'], isPopular: false),
-    PackageInfo(id: 'basic',     name: 'Basic', price: 29000,  scanLimit: 1000, maxMembers: 1,  features: ['1000 scan/bulan','1 perangkat','2GB penyimpanan','Export CSV'], isPopular: false),
-    PackageInfo(id: 'pro',       name: 'Pro',   price: 99000,  scanLimit: 5000, maxMembers: 1,  features: ['5000 scan/bulan','1 perangkat','10GB penyimpanan','Export CSV & Excel','Foto bukti scan','Dukungan prioritas'], isPopular: true),
-    PackageInfo(id: 'unlimited', name: 'Team',  price: 399000, scanLimit: 0,    maxMembers: 10, features: ['Scan unlimited','Hingga 10 anggota tim','Dashboard tim','Kategori order','Laporan tim','Penyimpanan unlimited'], isPopular: false),
+    PackageInfo(id: 'free',      name: 'Free',  price: 0,      scanLimit: 100,  maxMembers: 1,  features: ['Scan resi barcode','100 scan/bulan','Copy resi cepat'], isPopular: false),
+    PackageInfo(id: 'basic',     name: 'Basic', price: 29000,  scanLimit: 1000, maxMembers: 1,  features: ['1.000 scan/bulan','Gabung tim via kode invite','Backup & sync cloud','Export XLSX/CSV','Copy resi cepat','Foto bukti scan'], isPopular: false),
+    PackageInfo(id: 'pro',       name: 'Pro',   price: 99000,  scanLimit: 5000, maxMembers: 1,  features: ['5.000 scan/bulan','Gabung tim via kode invite','Backup & sync cloud','Export XLSX/CSV','Foto bukti scan','Copy resi cepat','Statistik lengkap'], isPopular: true),
+    PackageInfo(id: 'unlimited', name: 'Team',  price: 399000, scanLimit: 0,    maxMembers: 10, features: ['Unlimited scan/bulan','Buat & kelola tim','Hingga 10 anggota tim','Kategori wajib per scan','Backup & sync cloud','Export XLSX/CSV','Foto bukti scan','Statistik lengkap','Copy resi cepat','Dukungan prioritas'], isPopular: false),
   ];
 
   List<PackageInfo> _packages = [];

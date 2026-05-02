@@ -6,16 +6,19 @@ class SettingsProvider extends ChangeNotifier {
   static const String _vibrationKey = 'settings_vibration';
   static const String _wakelockKey = 'settings_wakelock';
   static const String _darkModeKey = 'settings_dark_mode'; // 'system', 'light', 'dark'
+  static const String _compressPhotoKey = 'settings_compress_photo';
 
   bool _soundEnabled = true;
   bool _vibrationEnabled = true;
   bool _wakelockEnabled = true;
   String _darkMode = 'system';
+  bool _compressPhoto = true;
 
   bool get soundEnabled => _soundEnabled;
   bool get vibrationEnabled => _vibrationEnabled;
   bool get wakelockEnabled => _wakelockEnabled;
   String get darkMode => _darkMode;
+  bool get compressPhoto => _compressPhoto;
 
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -23,6 +26,7 @@ class SettingsProvider extends ChangeNotifier {
     _vibrationEnabled = prefs.getBool(_vibrationKey) ?? true;
     _wakelockEnabled = prefs.getBool(_wakelockKey) ?? true;
     _darkMode = prefs.getString(_darkModeKey) ?? 'system';
+    _compressPhoto = prefs.getBool(_compressPhotoKey) ?? true;
     notifyListeners();
   }
 
@@ -51,6 +55,13 @@ class SettingsProvider extends ChangeNotifier {
     _darkMode = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_darkModeKey, value);
+    notifyListeners();
+  }
+
+  Future<void> setCompressPhoto(bool value) async {
+    _compressPhoto = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_compressPhotoKey, value);
     notifyListeners();
   }
 }

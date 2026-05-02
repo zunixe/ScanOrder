@@ -16,6 +16,7 @@ import '../../services/quota_service.dart';
 import 'history_provider.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
+import '../settings/settings_provider.dart';
 import '../subscription/subscription_provider.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -31,10 +32,26 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
+    final auth = context.read<AuthProvider>();
+    final teamId = auth.currentTeam?.id;
+    final adminUserId = auth.isAdmin ? null : auth.currentTeam?.createdBy;
     final provider = context.read<HistoryProvider>();
+    provider.setTeamContext(teamId, adminUserId);
     provider.loadDates();
     provider.loadOrders();
     provider.loadCategories();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload when returning to page (e.g. after leaving team)
+    final auth = context.read<AuthProvider>();
+    final teamId = auth.currentTeam?.id;
+    final adminUserId = auth.isAdmin ? null : auth.currentTeam?.createdBy;
+    final provider = context.read<HistoryProvider>();
+    provider.setTeamContext(teamId, adminUserId);
+    provider.refresh();
   }
 
   @override
@@ -309,7 +326,7 @@ class _HistoryPageState extends State<HistoryPage> {
                     ),
                     const Spacer(),
                     Text(
-                      '${provider.orders.length} scan',
+                      '${provider.filteredOrders.length} scan',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 13,
@@ -322,9 +339,10 @@ class _HistoryPageState extends State<HistoryPage> {
             const SizedBox(height: 8),
 
             // Team tier: kategori list dengan count
-            Consumer2<HistoryProvider, SubscriptionProvider>(
-              builder: (_, provider, sub, _) {
-                if (sub.currentTier != StorageTier.unlimited) return const SizedBox.shrink();
+            Consumer3<HistoryProvider, SubscriptionProvider, AuthProvider>(
+              builder: (_, provider, sub, auth, _) {
+                final isTeamUser = sub.currentTier == StorageTier.unlimited || auth.isTeamMember;
+                if (!isTeamUser) return const SizedBox.shrink();
                 if (provider.filterCategoryId != null) return const SizedBox.shrink();
                 if (provider.isSearching) return const SizedBox.shrink();
                 // Tampilkan daftar kategori sebagai tampilan utama
@@ -375,19 +393,19 @@ class _HistoryPageState extends State<HistoryPage> {
               },
             ),
 
-            // Order list — Team tier hanya tampil jika kategori dipilih atau sedang search
-            Consumer2<HistoryProvider, SubscriptionProvider>(
-              builder: (_, provider, sub, _) {
-                final isTeam = sub.currentTier == StorageTier.unlimited;
-                // Team: sembunyikan order list jika di tampilan kategori
-                if (isTeam && provider.filterCategoryId == null && !provider.isSearching) {
+            // Order list
+            Consumer3<HistoryProvider, SubscriptionProvider, AuthProvider>(
+              builder: (_, provider, sub, auth, _) {
+                final isTeamUser = sub.currentTier == StorageTier.unlimited || auth.isTeamMember;
+                // Team: jika tidak sedang mencari dan belum memilih kategori, sembunyikan daftar scan
+                if (isTeamUser && provider.filterCategoryId == null && !provider.isSearching) {
                   return const SizedBox.shrink();
                 }
                 return Expanded(
                   child: Column(
                     children: [
                       // Back button untuk Team tier saat di kategori
-                      if (isTeam && provider.filterCategoryId != null)
+                      if (isTeamUser && provider.filterCategoryId != null)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                           child: Align(
@@ -403,7 +421,7 @@ class _HistoryPageState extends State<HistoryPage> {
                           ),
                         ),
                       Expanded(
-                        child: provider.orders.isEmpty
+                        child: provider.filteredOrders.isEmpty
                             ? Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -430,9 +448,9 @@ class _HistoryPageState extends State<HistoryPage> {
                               )
                             : ListView.builder(
                                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                                itemCount: provider.orders.length,
+                                itemCount: provider.filteredOrders.length,
                                 itemBuilder: (_, i) =>
-                                    _OrderTile(order: provider.orders[i], isLatest: i == 0),
+                                    _OrderTile(order: provider.filteredOrders[i], isLatest: i == 0),
                               ),
                       ),
                     ],
@@ -552,18 +570,64 @@ class _OrderTile extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 3),
         child: ListTile(
           dense: true,
-          leading: CircleAvatar(
-            backgroundColor: color.withValues(alpha: 0.15),
-            radius: 20,
-            child: Text(
-              order.marketplace.substring(0, 1),
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ),
+          leading: hasPhoto
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: order.photoPath!.startsWith('http')
+                      ? Image.network(
+                          order.photoPath!,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => CircleAvatar(
+                            backgroundColor: color.withValues(alpha: 0.15),
+                            radius: 20,
+                            child: Text(
+                              order.marketplace.substring(0, 1),
+                              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                          ),
+                        )
+                      : File(order.photoPath!).existsSync()
+                          ? Image.file(
+                              File(order.photoPath!),
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => CircleAvatar(
+                                backgroundColor: color.withValues(alpha: 0.15),
+                                radius: 20,
+                                child: Text(
+                                  order.marketplace.substring(0, 1),
+                                  style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                              ),
+                            )
+                          : CircleAvatar(
+                              backgroundColor: color.withValues(alpha: 0.15),
+                              radius: 20,
+                              child: Text(
+                                order.marketplace.substring(0, 1),
+                                style: TextStyle(
+                                  color: color,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                )
+              : CircleAvatar(
+                  backgroundColor: color.withValues(alpha: 0.15),
+                  radius: 20,
+                  child: Text(
+                    order.marketplace.substring(0, 1),
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
           title: Text(
             order.resi,
             style: const TextStyle(
@@ -686,10 +750,9 @@ class _OrderTile extends StatelessWidget {
             minScale: 0.5,
             maxScale: 4.0,
             child: Center(
-              child: Image.file(
-                File(photoPath),
-                fit: BoxFit.contain,
-              ),
+              child: photoPath.startsWith('http')
+                  ? Image.network(photoPath, fit: BoxFit.contain)
+                  : Image.file(File(photoPath), fit: BoxFit.contain),
             ),
           ),
         ),
@@ -758,12 +821,13 @@ class _OrderTile extends StatelessWidget {
   }
 
   Future<void> _pickNewPhoto(BuildContext context, [ImageSource? source]) async {
+    final compress = context.read<SettingsProvider>().compressPhoto;
     final picker = ImagePicker();
     final picked = await picker.pickImage(
       source: source ?? ImageSource.camera,
-      maxWidth: 1920,
-      maxHeight: 1080,
-      imageQuality: 85,
+      maxWidth: compress ? 1280 : null,
+      maxHeight: compress ? 1280 : null,
+      imageQuality: compress ? 80 : null,
     );
     if (picked == null) return;
 

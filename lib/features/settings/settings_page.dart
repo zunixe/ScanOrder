@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart' as pinfo;
 import '../../core/theme.dart';
 import '../../core/supabase/supabase_service.dart';
+import '../../core/db/database_helper.dart';
 import '../../services/quota_service.dart';
+import '../../services/sync_queue.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
 import '../contact/contact_page.dart';
+import '../history/history_provider.dart';
+import '../scan/scan_provider.dart';
+import '../stats/stats_provider.dart';
 import '../subscription/subscription_provider.dart';
 import 'settings_provider.dart';
 
@@ -53,7 +59,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const Divider(height: 1),
 
               // ── 2. Kelola Team ──
-              if (isTeam || auth.hasTeam) ...[
+              if (auth.isLoggedIn) ...[
                 _TeamSection(auth: auth, isTeamAdmin: isTeam),
                 const Divider(height: 1),
               ],
@@ -357,6 +363,8 @@ class _ProfileSection extends StatelessWidget {
   }
 
   Color get _tierColor {
+    // Team member (non-admin) uses purple to indicate team affiliation
+    if (auth.isTeamMember) return Colors.purple;
     switch (tier) {
       case StorageTier.unlimited:
         return Colors.purple;
@@ -370,6 +378,8 @@ class _ProfileSection extends StatelessWidget {
   }
 
   String get _tierLabel {
+    // Show 'Anggota Tim' when user is a team member (not admin)
+    if (auth.isTeamMember) return 'Anggota Tim';
     switch (tier) {
       case StorageTier.unlimited:
         return 'Team';
@@ -410,8 +420,8 @@ class _TeamSection extends StatelessWidget {
               child: Icon(Icons.groups, color: Colors.white),
             ),
             title: Text(auth.currentTeam!.name, style: _settingsTitleStyle),
-            subtitle: Text('Kode invite: ${auth.currentTeam!.inviteCode}', style: _settingsSubtitleStyle),
-            trailing: IconButton(
+            subtitle: isTeamAdmin ? Text('Kode invite: ${auth.currentTeam!.inviteCode}', style: _settingsSubtitleStyle) : null,
+            trailing: isTeamAdmin ? IconButton(
               icon: const Icon(Icons.copy),
               tooltip: 'Salin kode invite',
               onPressed: () {
@@ -420,7 +430,7 @@ class _TeamSection extends StatelessWidget {
                   const SnackBar(content: Text('Kode invite disalin'), duration: Duration(seconds: 1)),
                 );
               },
-            ),
+            ) : null,
           ),
           // Anggota tim
           if (auth.teamMembers.isNotEmpty)
@@ -547,11 +557,17 @@ class _TeamSection extends StatelessWidget {
   }
 
   void _showLeaveTeamDialog(BuildContext context, AuthProvider auth) {
+    final isAdmin = auth.isAdmin;
+    final memberCount = auth.teamMembers.where((m) => m.role != 'admin').length;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Keluar dari Tim'),
-        content: Text('Kamu akan keluar dari tim "${auth.currentTeam?.name ?? ''}". Quota scan akan kembali ke paket pribadimu. Lanjutkan?'),
+        content: Text(isAdmin
+            ? (memberCount > 0
+                ? 'Sebagai admin, peran admin akan ditransfer ke anggota tertua. Lanjutkan?'
+                : 'Tim akan dibubarkan karena kamu satu-satunya anggota. Lanjutkan?')
+            : 'Kamu akan keluar dari tim "${auth.currentTeam?.name ?? ''}". Tampilan akan kembali ke data pribadimu. Lanjutkan?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
           FilledButton(
@@ -561,7 +577,9 @@ class _TeamSection extends StatelessWidget {
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(auth.error == null ? 'Berhasil keluar dari tim' : auth.error!)),
+                SnackBar(content: Text(auth.error == null
+                    ? (isAdmin && memberCount == 0 ? 'Tim berhasil dibubarkan' : 'Berhasil keluar dari tim')
+                    : auth.error!)),
               );
             },
             child: const Text('Keluar Tim'),
@@ -625,6 +643,22 @@ class _SettingsSection extends StatelessWidget {
               subtitle: Text(_darkModeLabel(settings.darkMode), style: _settingsSubtitleStyle),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _showDarkModePicker(context, settings),
+            ),
+            // Photo compression toggle (membership only)
+            Consumer2<AuthProvider, SubscriptionProvider>(
+              builder: (_, auth, sub, _) {
+                final isMember = sub.currentTier != StorageTier.free || auth.isTeamMember;
+                if (!isMember) return const SizedBox.shrink();
+                return SwitchListTile(
+                  dense: true,
+                  contentPadding: _settingsTilePadding,
+                  secondary: const Icon(Icons.compress_outlined),
+                  title: const Text('Kompres Foto', style: _settingsTitleStyle),
+                  subtitle: const Text('Perkecil ukuran foto saat scan & update', style: _settingsSubtitleStyle),
+                  value: settings.compressPhoto,
+                  onChanged: (v) => settings.setCompressPhoto(v),
+                );
+              },
             ),
           ],
         );
@@ -715,30 +749,158 @@ class _SyncSection extends StatelessWidget {
               ? 'Data tersinkronisasi ke cloud'
               : 'Login untuk backup & sync otomatis', style: _settingsSubtitleStyle),
         ),
-        if (isLoggedIn)
+        if (isLoggedIn) ...[
           ListTile(
             dense: true,
             contentPadding: _settingsTilePadding,
-            leading: const Icon(Icons.sync),
-            title: const Text('Sync Manual', style: _settingsTitleStyle),
-            subtitle: const Text('Push data lokal ke cloud', style: _settingsSubtitleStyle),
+            leading: const Icon(Icons.upload_outlined),
+            title: const Text('Push Data & Foto ke Cloud', style: _settingsTitleStyle),
+            subtitle: const Text('Upload data scan dan foto yang belum sync', style: _settingsSubtitleStyle),
             onTap: () async {
               try {
-                await context.read<AuthProvider>().syncOnLogin();
+                // Re-enqueue foto yang belum sync (local path, bukan cloud URL)
+                final db = DatabaseHelper.instance;
+                final userId = SupabaseService().currentUser?.id;
+                final syncQueue = SyncQueue();
+                if (userId != null) {
+                  final orders = await db.getAllOrders(userId: userId);
+                  int reEnqueued = 0;
+                  for (final o in orders) {
+                    if (o.photoPath != null &&
+                        o.photoPath!.isNotEmpty &&
+                        !o.photoPath!.startsWith('http') &&
+                        File(o.photoPath!).existsSync()) {
+                      syncQueue.enqueue(SyncTaskType.uploadPhoto, {
+                        'local_path': o.photoPath,
+                        'user_id': userId,
+                        'resi': o.resi,
+                        'cloud_filename': '$userId/${o.scannedAt.millisecondsSinceEpoch}.jpg',
+                      });
+                      reEnqueued++;
+                    }
+                  }
+                  // Also fix scans in Supabase where photo_url is still a local path
+                  try {
+                    final client = SupabaseService().client;
+                    if (client != null) {
+                      final badScans = await client
+                          .from('scans')
+                          .select('resi,photo_url')
+                          .eq('user_id', userId)
+                          .like('photo_url', '/%');
+                      for (final s in badScans) {
+                        final resi = s['resi'] as String;
+                        // Find matching local order with cloud URL
+                        final match = orders.where((o) => o.resi == resi && o.photoPath != null && o.photoPath!.startsWith('http')).firstOrNull;
+                        if (match != null) {
+                          await client.from('scans').update({'photo_url': match.photoPath}).eq('resi', resi);
+                          reEnqueued++;
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    debugPrint('[Settings] Fix Supabase photo_url error: $e');
+                  }
+                  if (reEnqueued > 0) {
+                    debugPrint('[Settings] Re-enqueued $reEnqueued photos for upload');
+                  }
+                }
+                await syncQueue.processPending();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Sync berhasil'), duration: Duration(seconds: 1)),
+                    const SnackBar(content: Text('Push data & foto selesai'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
                   );
                 }
               } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Gagal sync: $e')),
+                    SnackBar(content: Text('Gagal push: $e')),
                   );
                 }
               }
             },
           ),
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const Icon(Icons.download_outlined),
+            title: const Text('Pull Data dari Cloud', style: _settingsTitleStyle),
+            subtitle: const Text('Download data scan & foto dari cloud ke lokal', style: _settingsSubtitleStyle),
+            onTap: () async {
+              try {
+                await context.read<AuthProvider>().syncOnLogin();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Pull data selesai'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Gagal pull: $e')),
+                  );
+                }
+              }
+            },
+          ),
+          const Divider(height: 32),
+          // Debug: Clear all data
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const Icon(Icons.delete_forever, color: Colors.red),
+            title: const Text('Kosongkan Semua Data (Debug)', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+            subtitle: const Text('Hapus semua data scan lokal & cloud', style: _settingsSubtitleStyle),
+            onTap: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Hapus Semua Data?'),
+                  content: const Text('Semua data scan (lokal & cloud) akan dihapus permanen. Tidak bisa dikembalikan!'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Hapus', style: TextStyle(color: Colors.red))),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+              try {
+                final userId = SupabaseService().currentUser?.id;
+                // Clear local DB
+                final db = DatabaseHelper.instance;
+                await db.deleteAllScans();
+                // Clear Supabase
+                final client = SupabaseService().client;
+                if (client != null && userId != null) {
+                  // Delete user's scan_categories via resi matching
+                  final userScans = await client.from('scans').select('id').eq('user_id', userId);
+                  for (final s in userScans) {
+                    await client.from('scan_categories').delete().eq('scan_id', s['id']);
+                  }
+                  await client.from('scans').delete().eq('user_id', userId);
+                  await client.from('user_subscriptions').update({'cycle_used': 0}).eq('user_id', userId);
+                }
+                // Refresh providers
+                if (context.mounted) {
+                  context.read<HistoryProvider>().refresh();
+                  context.read<ScanProvider>().loadCounts();
+                  context.read<StatsProvider>().loadStats();
+                }
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Semua data berhasil dihapus'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Gagal hapus: $e')),
+                  );
+                }
+              }
+            },
+          ),
+        ],
       ],
     );
   }
