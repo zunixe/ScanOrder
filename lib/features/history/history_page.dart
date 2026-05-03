@@ -11,7 +11,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../services/quota_service.dart';
 import 'history_provider.dart';
 import '../auth/auth_provider.dart';
@@ -38,20 +38,21 @@ class _HistoryPageState extends State<HistoryPage> {
     final provider = context.read<HistoryProvider>();
     provider.setTeamContext(teamId, adminUserId);
     provider.loadDates();
-    provider.loadOrders();
+    provider.loadScans();
     provider.loadCategories();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reload when returning to page (e.g. after leaving team)
+    // Only update team context if changed — don't full refresh to preserve user's date/filter selection
     final auth = context.read<AuthProvider>();
     final teamId = auth.currentTeam?.id;
     final adminUserId = auth.isAdmin ? null : auth.currentTeam?.createdBy;
     final provider = context.read<HistoryProvider>();
+    final needsRefresh = provider.teamId != teamId;
     provider.setTeamContext(teamId, adminUserId);
-    provider.refresh();
+    if (needsRefresh) provider.refresh();
   }
 
   @override
@@ -62,9 +63,9 @@ class _HistoryPageState extends State<HistoryPage> {
 
   Future<void> _exportCsv() async {
     final provider = context.read<HistoryProvider>();
-    final orders = await provider.getAllForExport();
+    final scans = await provider.getAllForExport();
 
-    if (orders.isEmpty) {
+    if (scans.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tidak ada data untuk di-export')),
@@ -74,7 +75,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
     final rows = <List<String>>[
       ['No', 'Resi', 'Marketplace', 'Kategori', 'Tanggal', 'Waktu'],
-      ...orders.asMap().entries.map((e) {
+      ...scans.asMap().entries.map((e) {
         final o = e.value;
         final cats = o.categories.map((c) => c.name).join(', ');
         return [
@@ -98,9 +99,9 @@ class _HistoryPageState extends State<HistoryPage> {
 
   Future<void> _exportXlsx() async {
     final provider = context.read<HistoryProvider>();
-    final orders = await provider.getAllForExport();
+    final scans = await provider.getAllForExport();
 
-    if (orders.isEmpty) {
+    if (scans.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tidak ada data untuk di-export')),
@@ -125,8 +126,8 @@ class _HistoryPageState extends State<HistoryPage> {
     }
 
     // Data rows
-    for (var i = 0; i < orders.length; i++) {
-      final o = orders[i];
+    for (var i = 0; i < scans.length; i++) {
+      final o = scans[i];
       final cats = o.categories.map((c) => c.name).join(', ');
       final row = i + 2;
       sheet.cell(CellIndex.indexByString('A$row')).value = IntCellValue(i + 1);
@@ -153,42 +154,40 @@ class _HistoryPageState extends State<HistoryPage> {
 
   void _showExportMenu() {
     final auth = context.read<AuthProvider>();
-    final isTeam = context.read<SubscriptionProvider>().currentTier == StorageTier.unlimited;
+    final isPaid = context.read<SubscriptionProvider>().currentTier.index >= StorageTier.pro.index;
 
     showModalBottomSheet(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      builder: (ctx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.table_chart),
+            title: const Text('Export CSV'),
+            subtitle: const Text('Format tabel, bisa dibuka di semua app'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _exportCsv();
+            },
+          ),
+          if (isPaid)
             ListTile(
-              leading: const Icon(Icons.table_chart),
-              title: const Text('Export CSV'),
-              subtitle: const Text('Format tabel, bisa dibuka di semua app'),
+              leading: const Icon(Icons.file_present),
+              title: const Text('Export XLSX (Excel)'),
+              subtitle: const Text('Format Excel'),
               onTap: () {
                 Navigator.pop(ctx);
-                _exportCsv();
+                _exportXlsx();
               },
             ),
-            if (isTeam)
-              ListTile(
-                leading: const Icon(Icons.file_present),
-                title: const Text('Export XLSX (Excel)'),
-                subtitle: const Text('Format Excel, khusus paket Team'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _exportXlsx();
-                },
-              ),
-            if (!isTeam && auth.isLoggedIn)
-              ListTile(
-                leading: const Icon(Icons.lock_outline, color: Colors.grey),
-                title: const Text('Export XLSX (Excel)'),
-                subtitle: const Text('Upgrade ke Team untuk export Excel'),
-                enabled: false,
-              ),
-          ],
-        ),
+          if (!isPaid && auth.isLoggedIn)
+            ListTile(
+              leading: const Icon(Icons.lock_outline, color: Colors.grey),
+              title: const Text('Export XLSX (Excel)'),
+              subtitle: const Text('Upgrade ke paket berbayar untuk export Excel'),
+              enabled: false,
+            ),
+        ],
       ),
     );
   }
@@ -238,8 +237,8 @@ class _HistoryPageState extends State<HistoryPage> {
                     child: ListTile(
                       dense: true,
                       leading: const Icon(Icons.cloud_upload_outlined, color: Colors.orange),
-                      title: const Text('Data tersimpan lokal', style: TextStyle(fontSize: 13)),
-                      subtitle: const Text('Login untuk backup & sync ke cloud', style: TextStyle(fontSize: 12)),
+                      title: const Text('Data tersimpan lokal', style: TextStyle(fontSize: AppTheme.bodySize)),
+                      subtitle: const Text('Login untuk backup & sync ke cloud', style: TextStyle(fontSize: AppTheme.captionSize)),
                       trailing: TextButton(
                         onPressed: () => showLoginDialog(context),
                         child: const Text('Login'),
@@ -324,9 +323,34 @@ class _HistoryPageState extends State<HistoryPage> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    // "Semua" button
+                    InkWell(
+                      onTap: () => provider.setDate(HistoryProvider.allDatesSentinel),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: provider.selectedDate == HistoryProvider.allDatesSentinel
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Semua',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: provider.selectedDate == HistoryProvider.allDatesSentinel
+                                ? Theme.of(context).colorScheme.onPrimary
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
                     const Spacer(),
                     Text(
-                      '${provider.filteredOrders.length} scan',
+                      '${provider.filteredScans.length} scan',
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 13,
@@ -345,20 +369,12 @@ class _HistoryPageState extends State<HistoryPage> {
                 if (!isTeamUser) return const SizedBox.shrink();
                 if (provider.filterCategoryId != null) return const SizedBox.shrink();
                 if (provider.isSearching) return const SizedBox.shrink();
-                // Tampilkan daftar kategori sebagai tampilan utama
-                return Expanded(
-                  child: provider.categories.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.folder_open, size: 64, color: Colors.grey[400]),
-                              const SizedBox(height: 12),
-                              Text('Belum ada kategori', style: TextStyle(fontSize: 16, color: Colors.grey[500])),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
+                // Hide category list when "Semua" is selected
+                if (provider.selectedDate == HistoryProvider.allDatesSentinel) return const SizedBox.shrink();
+                // Jika ada kategori, tampilkan daftar kategori
+                if (provider.categories.isNotEmpty) {
+                  return Expanded(
+                    child: ListView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           itemCount: provider.categories.length,
                           itemBuilder: (_, i) {
@@ -381,7 +397,7 @@ class _HistoryPageState extends State<HistoryPage> {
                                   ),
                                   child: Text(
                                     '$count scan',
-                                    style: TextStyle(color: catColor, fontWeight: FontWeight.w600, fontSize: 13),
+                                    style: TextStyle(color: catColor, fontWeight: FontWeight.w600, fontSize: AppTheme.bodySize),
                                   ),
                                 ),
                                 onTap: () => provider.setFilterCategory(cat.id),
@@ -389,16 +405,45 @@ class _HistoryPageState extends State<HistoryPage> {
                             );
                           },
                         ),
+                  );
+                }
+                // Tidak ada kategori: tampilkan daftar order langsung (jika ada)
+                if (provider.scans.isEmpty) {
+                  return Expanded(
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
+                          const SizedBox(height: 12),
+                          Text('Belum ada scan', style: TextStyle(fontSize: AppTheme.sectionTitleSize, color: Colors.grey[500])),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+                // Ada scans tapi tidak ada kategori: tampilkan order list langsung
+                return Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    itemCount: provider.scans.length,
+                    itemBuilder: (_, i) => _OrderTile(order: provider.scans[i], isLatest: i == 0),
+                  ),
                 );
               },
             ),
 
-            // Order list
+            // Order list (shown when category is selected or searching, or for non-team users)
             Consumer3<HistoryProvider, SubscriptionProvider, AuthProvider>(
               builder: (_, provider, sub, auth, _) {
                 final isTeamUser = sub.currentTier == StorageTier.unlimited || auth.isTeamMember;
-                // Team: jika tidak sedang mencari dan belum memilih kategori, sembunyikan daftar scan
-                if (isTeamUser && provider.filterCategoryId == null && !provider.isSearching) {
+                // Team: sembunyikan jika belum memilih kategori dan ada kategori (sudah ditampilkan di atas)
+                // Tapi tampilkan jika sedang mencari atau sudah pilih kategori atau mode "Semua"
+                if (isTeamUser && provider.filterCategoryId == null && !provider.isSearching && provider.categories.isNotEmpty && provider.selectedDate != HistoryProvider.allDatesSentinel) {
+                  return const SizedBox.shrink();
+                }
+                // Team tanpa kategori: order list sudah ditampilkan di widget atas, skip
+                if (isTeamUser && provider.filterCategoryId == null && !provider.isSearching && provider.categories.isEmpty) {
                   return const SizedBox.shrink();
                 }
                 return Expanded(
@@ -421,7 +466,7 @@ class _HistoryPageState extends State<HistoryPage> {
                           ),
                         ),
                       Expanded(
-                        child: provider.filteredOrders.isEmpty
+                        child: provider.filteredScans.isEmpty
                             ? Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
@@ -439,7 +484,7 @@ class _HistoryPageState extends State<HistoryPage> {
                                           ? 'Tidak ditemukan'
                                           : 'Belum ada scan',
                                       style: TextStyle(
-                                        fontSize: 16,
+                                        fontSize: AppTheme.sectionTitleSize,
                                         color: Colors.grey[500],
                                       ),
                                     ),
@@ -448,9 +493,9 @@ class _HistoryPageState extends State<HistoryPage> {
                               )
                             : ListView.builder(
                                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                                itemCount: provider.filteredOrders.length,
+                                itemCount: provider.filteredScans.length,
                                 itemBuilder: (_, i) =>
-                                    _OrderTile(order: provider.filteredOrders[i], isLatest: i == 0),
+                                    _OrderTile(order: provider.filteredScans[i], isLatest: i == 0),
                               ),
                       ),
                     ],
@@ -465,6 +510,7 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   String _formatDateDisplay(String dateStr) {
+    if (dateStr == HistoryProvider.allDatesSentinel) return 'Semua';
     final date = DateTime.tryParse(dateStr);
     if (date == null) return dateStr;
     final now = DateTime.now();
@@ -515,7 +561,7 @@ class _HistoryPageState extends State<HistoryPage> {
 }
 
 class _OrderTile extends StatelessWidget {
-  final ScannedOrder order;
+  final ScanRecord order;
   final bool isLatest;
   const _OrderTile({required this.order, this.isLatest = false});
 
@@ -535,10 +581,10 @@ class _OrderTile extends StatelessWidget {
 
     return Dismissible(
       key: ValueKey(order.id),
-      direction: DismissDirection.endToStart,
+      direction: DismissDirection.startToEnd,
       background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
         color: Colors.red,
         child: const Icon(Icons.delete, color: Colors.white),
       ),
@@ -563,7 +609,7 @@ class _OrderTile extends StatelessWidget {
       },
       onDismissed: (_) {
         if (order.id != null) {
-          context.read<HistoryProvider>().deleteOrder(order.id!);
+          context.read<HistoryProvider>().deleteScan(order.id!);
         }
       },
       child: Card(
@@ -632,42 +678,92 @@ class _OrderTile extends StatelessWidget {
             order.resi,
             style: const TextStyle(
               fontWeight: FontWeight.w600,
-              fontSize: 14,
+              fontSize: AppTheme.cardTitleSize,
               fontFamily: 'monospace',
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          subtitle: Row(
-            children: [
-              Text(
-                order.marketplace,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: color,
-                  fontWeight: FontWeight.w500,
+          subtitle: SizedBox(
+            height: 20,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                Text(
+                  order.marketplace,
+                  style: TextStyle(
+                    fontSize: AppTheme.captionSize,
+                    color: color,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              if (order.categories.isNotEmpty) ...[
                 const SizedBox(width: 6),
-                ...order.categories.map((cat) => Container(
-                  margin: const EdgeInsets.only(right: 4),
+                Text(
+                  DateFormat('dd MMM yyyy', 'id').format(order.scannedAt),
+                  style: TextStyle(
+                    fontSize: AppTheme.microSize,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (order.categories.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  ...order.categories.take(2).map((cat) => Container(
+                    margin: const EdgeInsets.only(right: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                    decoration: BoxDecoration(
+                      color: _parseCatColor(cat.color).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      cat.name,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: _parseCatColor(cat.color),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  )),
+                  if (order.categories.length > 2)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '+${order.categories.length - 2}',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              if (order.syncStatus == 'pending') ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.cloud_upload_outlined, size: 14, color: Colors.orange),
+              ],
+              if (order.syncStatus == 'duplicate_conflict') ...[
+                const SizedBox(width: 6),
+                Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                   decoration: BoxDecoration(
-                    color: _parseCatColor(cat.color).withValues(alpha: 0.2),
+                    color: Colors.red.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    cat.name,
+                  child: const Text(
+                    'Duplikat Cloud',
                     style: TextStyle(
-                      fontSize: 10,
-                      color: _parseCatColor(cat.color),
+                      fontSize: AppTheme.microSize,
+                      color: Colors.red,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                )),
+                ),
               ],
             ],
+          ),
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
@@ -689,7 +785,7 @@ class _OrderTile extends StatelessWidget {
               Text(
                 time,
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppTheme.captionSize,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
@@ -827,7 +923,7 @@ class _OrderTile extends StatelessWidget {
       source: source ?? ImageSource.camera,
       maxWidth: compress ? 1280 : null,
       maxHeight: compress ? 1280 : null,
-      imageQuality: compress ? 80 : null,
+      imageQuality: compress ? 85 : null,
     );
     if (picked == null) return;
 

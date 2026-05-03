@@ -84,7 +84,7 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
                   children: [
                     Text(
                       _isSignup ? 'Buat Akun' : 'Login ke Cloud',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.sectionTitleSize),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
@@ -113,7 +113,7 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
                       const SizedBox(height: 16),
                       const Text(
                         'Pilih Paket',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.cardTitleSize),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),
@@ -156,7 +156,7 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
                         ),
                         child: Text(
                           _formatError(auth.error!),
-                          style: const TextStyle(color: Colors.red, fontSize: 12),
+                          style: const TextStyle(color: Colors.red, fontSize: AppTheme.captionSize),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -254,7 +254,7 @@ class _TierChip extends StatelessWidget {
               label,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                fontSize: 13,
+                fontSize: AppTheme.bodySize,
                 color: selected ? color : Colors.grey[700],
               ),
             ),
@@ -262,7 +262,7 @@ class _TierChip extends StatelessWidget {
             Text(
               subtitle,
               style: TextStyle(
-                fontSize: 10,
+                fontSize: AppTheme.microSize,
                 color: selected ? color : Colors.grey[500],
               ),
             ),

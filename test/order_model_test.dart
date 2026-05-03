@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:scanorder/models/order.dart';
+import 'package:scanorder/models/scan_record.dart';
 
 void main() {
-  group('ScannedOrder', () {
+  group('ScanRecord', () {
     test('fromMap creates correct order', () {
       final map = {
         'id': 1,
@@ -12,7 +12,7 @@ void main() {
         'scanned_at': DateTime(2025, 1, 15, 10, 30).millisecondsSinceEpoch,
         'date': '2025-01-15',
       };
-      final order = ScannedOrder.fromMap(map);
+      final order = ScanRecord.fromMap(map);
       expect(order.id, 1);
       expect(order.resi, 'SPX123456789');
       expect(order.marketplace, 'Shopee');
@@ -21,7 +21,7 @@ void main() {
     });
 
     test('toMap roundtrip', () {
-      final order = ScannedOrder(
+      final order = ScanRecord(
         id: 1,
         resi: 'CM40443408053',
         marketplace: 'JNE',
@@ -45,7 +45,7 @@ void main() {
         'scanned_at': DateTime(2025, 1, 15, 10, 30).millisecondsSinceEpoch,
         'date': '2025-01-15',
       };
-      final order = ScannedOrder.fromMap(map);
+      final order = ScanRecord.fromMap(map);
       expect(order.photoPath, isNull);
       expect(order.resi, 'JP1234567890');
     });

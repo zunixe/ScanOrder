@@ -2,15 +2,16 @@ import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../services/sync_queue.dart';
 
 class HistoryProvider extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
 
-  List<ScannedOrder> orders = [];
+  List<ScanRecord> scans = [];
   String selectedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  static const String allDatesSentinel = '__ALL__';
   List<String> availableDates = [];
   String searchQuery = '';
   bool isSearching = false;
@@ -18,14 +19,14 @@ class HistoryProvider extends ChangeNotifier {
   List<ScanCategory> categories = [];
   Map<int, int> categoryCounts = {};
 
-  /// Returns orders filtered by active category (for team mode UI)
-  List<ScannedOrder> get filteredOrders {
-    if (filterCategoryId == null) return orders;
+  /// Returns scans filtered by active category (for team mode UI)
+  List<ScanRecord> get filteredScans {
+    if (filterCategoryId == null) return scans;
     // In team mode, categories come from Supabase nested data
     // Match by category name since local id != Supabase UUID
     final filterCat = categories.where((c) => c.id == filterCategoryId).firstOrNull;
-    if (filterCat == null) return orders;
-    return orders.where((o) =>
+    if (filterCat == null) return scans;
+    return scans.where((o) =>
       o.categories.any((c) => c.name == filterCat.name && c.userId == filterCat.userId)
     ).toList();
   }
@@ -33,6 +34,7 @@ class HistoryProvider extends ChangeNotifier {
   String? _userId;
   String? _teamId;
   String? _adminUserId;
+  String? get teamId => _teamId;
 
   void setUserId(String? userId) {
     _userId = userId;
@@ -53,37 +55,46 @@ class HistoryProvider extends ChangeNotifier {
       availableDates = await _db.getDistinctDates(userId: _userId);
       debugPrint('[History] loadDates PERSONAL result: ${availableDates.length} dates');
     }
+    // Auto-select first available date if today has no scans (but not if user chose "Semua")
+    if (selectedDate != allDatesSentinel && availableDates.isNotEmpty && !availableDates.contains(selectedDate)) {
+      selectedDate = availableDates.first;
+      debugPrint('[History] loadDates: auto-selected date=$selectedDate');
+    }
     notifyListeners();
   }
 
-  Future<void> loadOrders() async {
+  Future<void> loadScans() async {
     if (_teamId != null) {
       // Team mode: query Supabase
-      debugPrint('[History] loadOrders TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
+      debugPrint('[History] loadScans TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
       List<Map<String, dynamic>> raw;
       if (isSearching && searchQuery.isNotEmpty) {
-        raw = await SupabaseService().searchTeamOrders(_teamId!, searchQuery);
+        raw = await SupabaseService().searchTeamScans(_teamId!, searchQuery);
+      } else if (selectedDate == allDatesSentinel) {
+        raw = await SupabaseService().fetchTeamScans(_teamId!);
       } else {
-        raw = await SupabaseService().getTeamOrdersByDate(_teamId!, selectedDate);
+        raw = await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
       }
-      debugPrint('[History] loadOrders TEAM raw: ${raw.length} rows');
-      if (raw.isNotEmpty) debugPrint('[History] loadOrders TEAM sample: ${raw.first}');
-      orders = raw.map((m) => ScannedOrder.fromSupabase(m)).toList();
-      debugPrint('[History] loadOrders TEAM parsed: ${orders.length} orders');
+      debugPrint('[History] loadScans TEAM raw: ${raw.length} rows');
+      if (raw.isNotEmpty) debugPrint('[History] loadScans TEAM sample: ${raw.first}');
+      scans = raw.map((m) => ScanRecord.fromSupabase(m)).toList();
+      debugPrint('[History] loadScans TEAM parsed: ${scans.length} scans');
     } else {
       // Personal mode: query local DB
       if (filterCategoryId != null) {
-        orders = await _db.getOrdersByCategory(filterCategoryId!, userId: _userId);
+        scans = await _db.getScansByCategory(filterCategoryId!, userId: _userId);
       } else if (isSearching && searchQuery.isNotEmpty) {
-        orders = await _db.searchOrders(searchQuery, userId: _userId);
+        scans = await _db.searchScans(searchQuery, userId: _userId);
+      } else if (selectedDate == allDatesSentinel) {
+        scans = await _db.getAllScans(userId: _userId);
       } else {
-        orders = await _db.getOrdersByDate(selectedDate, userId: _userId);
+        scans = await _db.getScansByDate(selectedDate, userId: _userId);
       }
-      // Attach categories to orders (local only)
-      for (var i = 0; i < orders.length; i++) {
-        if (orders[i].id != null) {
-          final cats = await _db.getCategoriesForOrder(orders[i].id!);
-          orders[i] = orders[i].copyWith(categories: cats);
+      // Attach categories to scans (local only)
+      for (var i = 0; i < scans.length; i++) {
+        if (scans[i].id != null) {
+          final cats = await _db.getCategoriesForOrder(scans[i].id!);
+          scans[i] = scans[i].copyWith(categories: cats);
         }
       }
     }
@@ -94,34 +105,34 @@ class HistoryProvider extends ChangeNotifier {
     selectedDate = date;
     isSearching = false;
     searchQuery = '';
-    await loadOrders();
+    await loadScans();
   }
 
   Future<void> search(String query) async {
     searchQuery = query;
     isSearching = query.isNotEmpty;
-    await loadOrders();
+    await loadScans();
   }
 
-  Future<void> deleteOrder(int id) async {
+  Future<void> deleteScan(int id) async {
     // Ambil order untuk dapat resi sebelum delete
-    final all = await _db.getAllOrders();
-    final order = all.firstWhere((o) => o.id == id, orElse: () => ScannedOrder(
+    final all = await _db.getAllScans();
+    final order = all.firstWhere((o) => o.id == id, orElse: () => ScanRecord(
       resi: '', marketplace: '', scannedAt: DateTime.now(), date: ''
     ));
     // Delete dari local DB
-    await _db.deleteOrder(id);
+    await _db.deleteScan(id);
     // Sync delete ke Supabase
     if (order.resi.isNotEmpty) {
-      SupabaseService().deleteOrderByResi(order.resi);
+      SupabaseService().deleteScanByResi(order.resi);
     }
-    await loadOrders();
+    await loadScans();
     await loadDates();
   }
 
   Future<void> refresh() async {
     await loadDates();
-    await loadOrders();
+    await loadScans();
     await loadCategories();
   }
 
@@ -158,18 +169,20 @@ class HistoryProvider extends ChangeNotifier {
   void setFilterCategory(int? categoryId) async {
     filterCategoryId = categoryId;
     if (_teamId != null && categoryId != null) {
-      // Team mode with category: load all team orders from Supabase,
+      // Team mode with category: load all team scans from Supabase,
       // then filter by matching resi with local scan_categories
-      final allRaw = await SupabaseService().getTeamOrdersByDate(_teamId!, selectedDate);
-      final allOrders = allRaw.map((m) => ScannedOrder.fromSupabase(m)).toList();
+      final allRaw = selectedDate == allDatesSentinel
+          ? await SupabaseService().fetchTeamScans(_teamId!)
+          : await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
+      final allOrders = allRaw.map((m) => ScanRecord.fromSupabase(m)).toList();
 
       // Get local resis that belong to this category
-      final localCatOrders = await _db.getOrdersByCategory(categoryId, userId: _userId, teamId: _teamId);
+      final localCatOrders = await _db.getScansByCategory(categoryId, userId: _userId, teamId: _teamId);
       final localResis = localCatOrders.map((o) => o.resi).toSet();
 
       // Filter: if Supabase has scan_categories, use those; otherwise use local resis
       final filterCat = categories.where((c) => c.id == categoryId).firstOrNull;
-      orders = allOrders.where((o) {
+      scans = allOrders.where((o) {
         // Check Supabase nested categories first
         if (o.categories.isNotEmpty) {
           return o.categories.any((c) => c.name == filterCat?.name);
@@ -178,32 +191,32 @@ class HistoryProvider extends ChangeNotifier {
         return localResis.contains(o.resi);
       }).toList();
 
-      // Attach local categories to orders that don't have them from Supabase
-      for (var i = 0; i < orders.length; i++) {
-        if (orders[i].categories.isEmpty && filterCat != null) {
-          orders[i] = orders[i].copyWith(categories: [filterCat]);
+      // Attach local categories to scans that don't have them from Supabase
+      for (var i = 0; i < scans.length; i++) {
+        if (scans[i].categories.isEmpty && filterCat != null) {
+          scans[i] = scans[i].copyWith(categories: [filterCat]);
         }
       }
       notifyListeners();
     } else if (_teamId != null && categoryId == null) {
-      // Back from category: just clear filter, orders already loaded
+      // Back from category: just clear filter, scans already loaded
       filterCategoryId = null;
-      await loadOrders();
+      await loadScans();
     } else {
-      await loadOrders();
+      await loadScans();
     }
   }
 
   Future<void> updatePhoto(int id, String? photoPath) async {
-    await _db.updateOrderPhoto(id, photoPath);
-    // Update in-memory orders immediately (don't re-fetch from Supabase which may have old photo)
-    final idx = orders.indexWhere((o) => o.id == id);
+    await _db.updateScanPhoto(id, photoPath);
+    // Update in-memory scans immediately (don't re-fetch from Supabase which may have old photo)
+    final idx = scans.indexWhere((o) => o.id == id);
     if (idx >= 0) {
-      orders[idx] = orders[idx].copyWith(photoPath: photoPath);
+      scans[idx] = scans[idx].copyWith(photoPath: photoPath);
     }
     // Sync photo change to Supabase
     if (photoPath != null && _userId != null) {
-      final order = idx >= 0 ? orders[idx] : await _db.getOrderById(id);
+      final order = idx >= 0 ? scans[idx] : await _db.getScanById(id);
       final syncQueue = SyncQueue();
       syncQueue.enqueue(SyncTaskType.uploadPhoto, {
         'local_path': photoPath,
@@ -214,7 +227,7 @@ class HistoryProvider extends ChangeNotifier {
     } else if (photoPath == null && _userId != null) {
       // Photo removed — update Supabase to null
       try {
-        final order = idx >= 0 ? orders[idx] : await _db.getOrderById(id);
+        final order = idx >= 0 ? scans[idx] : await _db.getScanById(id);
         if (order != null) {
           final client = SupabaseService().client;
           if (client != null) {
@@ -228,21 +241,21 @@ class HistoryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<ScannedOrder>> getAllForExport() async {
+  Future<List<ScanRecord>> getAllForExport() async {
     if (_teamId != null) {
       // Team mode: fetch all from Supabase
-      final raw = await SupabaseService().fetchTeamOrders(_teamId!);
-      return raw.map((m) => ScannedOrder.fromSupabase(m)).toList();
+      final raw = await SupabaseService().fetchTeamScans(_teamId!);
+      return raw.map((m) => ScanRecord.fromSupabase(m)).toList();
     }
-    final orders = await _db.getAllOrders(userId: _userId);
-    debugPrint('[HistoryProvider] getAllForExport: userId=$_userId, orders=${orders.length}');
+    final scans = await _db.getAllScans(userId: _userId);
+    debugPrint('[HistoryProvider] getAllForExport: userId=$_userId, scans=${scans.length}');
     // Attach categories to each order for export
-    for (var i = 0; i < orders.length; i++) {
-      if (orders[i].id != null) {
-        final cats = await _db.getCategoriesForOrder(orders[i].id!);
-        orders[i] = orders[i].copyWith(categories: cats);
+    for (var i = 0; i < scans.length; i++) {
+      if (scans[i].id != null) {
+        final cats = await _db.getCategoriesForOrder(scans[i].id!);
+        scans[i] = scans[i].copyWith(categories: cats);
       }
     }
-    return orders;
+    return scans;
   }
 }

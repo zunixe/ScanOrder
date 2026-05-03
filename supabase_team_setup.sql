@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS scans (
     scanned_at BIGINT NOT NULL,
     date TEXT NOT NULL,
     photo_url TEXT,
-    team_id UUID REFERENCES teams(id) ON DELETE SET NULL
+    team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
+    scanned_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
 
 -- Sequence untuk auto-increment id
@@ -42,6 +43,7 @@ END $$;
 -- Kolom tambahan jika belum ada
 ALTER TABLE scans ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE scans ADD COLUMN IF NOT EXISTS team_id UUID;
+ALTER TABLE scans ADD COLUMN IF NOT EXISTS scanned_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
 
 -- ============================================================
 -- 2. TABLE: teams
@@ -349,6 +351,12 @@ DROP POLICY IF EXISTS "Users manage own scan_categories" ON scan_categories;
 CREATE POLICY "Users manage own scan_categories" ON scan_categories
     FOR ALL USING (
         category_id IN (SELECT id FROM categories WHERE user_id = auth.uid())
+        OR category_id IN (
+            SELECT c.id FROM categories c
+            INNER JOIN teams t ON t.created_by = c.user_id
+            INNER JOIN team_members tm ON tm.team_id = t.id
+            WHERE tm.user_id = auth.uid()
+        )
     );
 
 -- v5: anggota tim bisa baca scan_categories untuk scan yang ada di tim mereka
@@ -409,6 +417,8 @@ CREATE POLICY "packages_anon_select"
 CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
 CREATE INDEX IF NOT EXISTS idx_scans_team_id ON scans(team_id);
 CREATE INDEX IF NOT EXISTS idx_scans_resi ON scans(resi);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_team_resi_unique ON scans(team_id, resi);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scans_user_resi_unique ON scans(user_id, resi);
 CREATE INDEX IF NOT EXISTS idx_scans_date ON scans(date);
 CREATE INDEX IF NOT EXISTS idx_scans_device_id ON scans(device_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_user_id ON team_members(user_id);
@@ -467,3 +477,57 @@ WHERE s.user_id = tm.user_id::text::uuid
 -- SELESAI v5 — semua tabel, RLS, policies, indexes, seed data,
 -- contact_messages, dan migrasi team_id
 -- ============================================================
+
+-- ============================================================
+-- 20. CLEANUP: Hapus storage foto saat user dihapus
+-- Supabase Storage tidak mendukung ON DELETE CASCADE,
+-- jadi perlu trigger untuk hapus folder foto user dari bucket
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION delete_user_storage()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    folder_path TEXT;
+BEGIN
+    -- Hapus folder foto user dari bucket scan-photos
+    -- Supabase storage API tidak bisa dipanggil dari SQL,
+    -- jadi kita hapus referensi photo_url dari scans yang di-CASCADE
+    -- Storage cleanup harus dilakukan via Edge Function atau app logic
+    NULL;
+END;
+$$;
+
+-- Catatan: Supabase Storage tidak bisa diakses dari SQL trigger.
+-- Cleanup storage harus dilakukan melalui:
+-- 1. Edge Function yang dipanggil saat user delete
+-- 2. Atau app-side cleanup sebelum memanggil admin.deleteUser()
+
+-- ============================================================
+-- 21. FUNCTION: Hapus semua data user (dipanggil dari app)
+-- Termasuk hapus folder storage via app-side sebelum delete akun
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION cleanup_user_data(target_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    -- Hapus scan_categories untuk scans milik user
+    DELETE FROM scan_categories WHERE scan_id IN (SELECT id FROM scans WHERE user_id = target_user_id);
+    -- Hapus scans milik user
+    DELETE FROM scans WHERE user_id = target_user_id;
+    -- Hapus categories milik user
+    DELETE FROM categories WHERE user_id = target_user_id;
+    -- Hapus team_members
+    DELETE FROM team_members WHERE user_id = target_user_id;
+    -- Hapus user_subscriptions
+    DELETE FROM user_subscriptions WHERE user_id = target_user_id;
+    -- Jika user adalah admin tim, bubarkan tim
+    DELETE FROM team_members WHERE team_id IN (SELECT id FROM teams WHERE created_by = target_user_id);
+    DELETE FROM teams WHERE created_by = target_user_id;
+END;
+$$;

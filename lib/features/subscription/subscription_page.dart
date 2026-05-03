@@ -60,130 +60,128 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 builder: (_, auth, _) {
                   final isTeam = provider.currentTier == StorageTier.unlimited;
                   final isPaid = provider.isPro || isTeam;
-                  final cardColor = isPaid
-                      ? AppTheme.primaryColor
-                      : Theme.of(context).colorScheme.surfaceContainerHighest;
                   final iconColor = isPaid ? Colors.amber : Colors.grey;
                   final textColor = isPaid ? Colors.white : null;
                   final subColor = isPaid ? Colors.white70 : null;
 
+                  // Shared content for both paid and free cards
+                  final cardContent = Column(
+                    children: [
+                      Icon(
+                        isTeam ? Icons.groups : provider.isPro ? Icons.workspace_premium : Icons.lock_outline,
+                        size: 48,
+                        color: iconColor,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        isTeam ? 'TEAM' : provider.tierName.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: AppTheme.sectionTitleSize,
+                          fontWeight: FontWeight.bold,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (isPaid && !provider.subscriptionActive) ...[
+                        Text(
+                          'Paket tidak aktif (expired)',
+                          style: TextStyle(
+                            fontSize: AppTheme.cardTitleSize,
+                            fontWeight: FontWeight.w600,
+                            color: isPaid ? Colors.orangeAccent : Colors.red,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Perpanjang untuk scan lagi',
+                          style: TextStyle(
+                            fontSize: AppTheme.captionSize,
+                            color: isPaid ? Colors.white70 : Colors.grey[600],
+                          ),
+                        ),
+                      ] else if (isTeam && auth.hasTeam) ...[
+                        Text(
+                          auth.currentTeam!.name,
+                          style: const TextStyle(
+                            fontSize: AppTheme.cardTitleSize,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${auth.teamMembers.length} anggota • Scan tanpa batas',
+                          style: TextStyle(fontSize: AppTheme.captionSize, color: subColor),
+                        ),
+                      ] else ...[
+                        Text(
+                          provider.cycleAllowance < 0
+                              ? 'Scan tanpa batas'
+                              : '${provider.cycleUsed} / ${provider.cycleAllowance} scan di periode aktif',
+                          style: TextStyle(fontSize: AppTheme.captionSize, color: subColor),
+                        ),
+                      ],
+                      if (provider.activeFrom != null && provider.activeUntil != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Aktif: ${_fmtDate(provider.activeFrom!)} - ${_fmtDate(provider.activeUntil!)}',
+                          style: TextStyle(
+                            fontSize: AppTheme.captionSize,
+                            color: isPaid ? Colors.white70 : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                      if (isTeam) ...[
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: 1,
+                          backgroundColor: Colors.white24,
+                          color: Colors.white,
+                          minHeight: 6,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Unlimited scan tersisa di periode ini',
+                          style: TextStyle(
+                            fontSize: AppTheme.microSize,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ] else if (provider.cycleAllowance >= 0) ...[
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: provider.cycleAllowance > 0
+                              ? (provider.cycleUsed / provider.cycleAllowance).clamp(0.0, 1.0)
+                              : 0,
+                          backgroundColor: isPaid ? Colors.white24 : Colors.grey[300],
+                          color: provider.remainingFree > 20
+                              ? (isPaid ? Colors.white : AppTheme.successColor)
+                              : AppTheme.dangerColor,
+                          minHeight: 6,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${provider.remainingFree >= 0 ? provider.remainingFree : 0} scan tersisa di periode ini',
+                          style: TextStyle(
+                            fontSize: AppTheme.microSize,
+                            color: isPaid ? Colors.white70 : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+
                   return SizedBox(
                     width: double.infinity,
                     child: Card(
-                      color: cardColor,
+                      color: isPaid
+                          ? AppTheme.primaryColor
+                          : Theme.of(context).colorScheme.surfaceContainerHighest,
                       child: Padding(
                         padding: const EdgeInsets.all(20),
-                        child: Column(
-                          children: [
-                          Icon(
-                            isTeam
-                                ? Icons.groups
-                                : provider.isPro
-                                    ? Icons.workspace_premium
-                                    : Icons.lock_outline,
-                            size: 48,
-                            color: iconColor,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            isTeam ? 'TEAM' : provider.tierName.toUpperCase(),
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: textColor,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          if (isPaid && !provider.subscriptionActive) ...[
-                            Text(
-                              'Paket tidak aktif (expired)',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isPaid ? Colors.orangeAccent : Colors.red,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Perpanjang untuk scan lagi',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isPaid ? Colors.white70 : Colors.grey[600],
-                              ),
-                            ),
-                          ] else if (isTeam && auth.hasTeam) ...[
-                            Text(
-                              auth.currentTeam!.name,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${auth.teamMembers.length} anggota • Scan tanpa batas',
-                              style: TextStyle(fontSize: 14, color: subColor),
-                            ),
-                          ] else ...[
-                            Text(
-                              provider.cycleAllowance < 0
-                                  ? 'Scan tanpa batas'
-                                  : '${provider.cycleUsed} / ${provider.cycleAllowance} scan di periode aktif',
-                              style: TextStyle(fontSize: 14, color: subColor),
-                            ),
-                          ],
-                          if (provider.activeFrom != null && provider.activeUntil != null) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Aktif: ${_fmtDate(provider.activeFrom!)} - ${_fmtDate(provider.activeUntil!)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isPaid ? Colors.white70 : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                          if (isTeam) ...[
-                            const SizedBox(height: 8),
-                            LinearProgressIndicator(
-                              value: 1,
-                              backgroundColor: Colors.white24,
-                              color: Colors.white,
-                              minHeight: 6,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Unlimited scan tersisa di periode ini',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.white70,
-                              ),
-                            ),
-                          ] else if (provider.cycleAllowance >= 0) ...[
-                            const SizedBox(height: 8),
-                            LinearProgressIndicator(
-                              value: provider.cycleAllowance > 0
-                                  ? (provider.cycleUsed / provider.cycleAllowance).clamp(0.0, 1.0)
-                                  : 0,
-                              backgroundColor: isPaid ? Colors.white24 : Colors.grey[300],
-                              color: provider.remainingFree > 20
-                                  ? (isPaid ? Colors.white : AppTheme.successColor)
-                                  : AppTheme.dangerColor,
-                              minHeight: 6,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${provider.remainingFree >= 0 ? provider.remainingFree : 0} scan tersisa di periode ini',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isPaid ? Colors.white70 : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                          ],
-                        ),
+                        child: cardContent,
                       ),
                     ),
                   );
@@ -206,7 +204,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                             Text(
                               'Fitur Paket Pro',
                               style: TextStyle(
-                                fontSize: 18,
+                                fontSize: AppTheme.sectionTitleSize,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -259,7 +257,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                             Text(
                               'Fitur Paket Basic',
                               style: TextStyle(
-                                fontSize: 18,
+                                fontSize: AppTheme.sectionTitleSize,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -312,7 +310,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                             Text(
                               'Fitur Paket Team',
                               style: TextStyle(
-                                fontSize: 18,
+                                fontSize: AppTheme.sectionTitleSize,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -377,7 +375,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         Expanded(
                           child: Text(
                             provider.purchaseError!,
-                            style: const TextStyle(color: Colors.red, fontSize: 12),
+                            style: const TextStyle(color: Colors.red, fontSize: AppTheme.microSize),
                           ),
                         ),
                       ],
@@ -391,7 +389,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                 const Text(
                   'Pilih Paket',
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: AppTheme.heroSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -510,7 +508,7 @@ class _PricingCard extends StatelessWidget {
                               title,
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                                fontSize: AppTheme.cardTitleSize,
                               ),
                             ),
                             if (badge != null) ...[
@@ -528,7 +526,7 @@ class _PricingCard extends StatelessWidget {
                                   badge!,
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 10,
+                                    fontSize: AppTheme.microSize,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -541,7 +539,7 @@ class _PricingCard extends StatelessWidget {
                           Text(
                             subtitle!,
                             style: const TextStyle(
-                              fontSize: 12,
+                              fontSize: AppTheme.microSize,
                               color: Colors.grey,
                             ),
                           ),
@@ -564,7 +562,7 @@ class _PricingCard extends StatelessWidget {
                   Text(
                     price,
                     style: TextStyle(
-                      fontSize: 22,
+                      fontSize: AppTheme.heroSize,
                       fontWeight: FontWeight.bold,
                       color: isPrimary ? AppTheme.primaryColor : null,
                     ),
@@ -572,7 +570,7 @@ class _PricingCard extends StatelessWidget {
                   Text(
                     period,
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: AppTheme.microSize,
                       color: Colors.grey,
                     ),
                   ),
@@ -591,7 +589,7 @@ class _PricingCard extends StatelessWidget {
                       Expanded(
                         child: Text(
                           f,
-                          style: const TextStyle(fontSize: 12),
+                          style: const TextStyle(fontSize: AppTheme.microSize),
                         ),
                       ),
                     ],
@@ -632,12 +630,12 @@ class _FeatureRow extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.cardTitleSize),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: TextStyle(fontSize: AppTheme.microSize, color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -711,13 +709,13 @@ class _UpgradeCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 const Text(
                   'Upgrade Paket',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.cardTitleSize),
                 ),
             ],
           ),
           if (carryNote.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(carryNote, style: TextStyle(fontSize: 11, color: Colors.amber.shade800)),
+            Text(carryNote, style: TextStyle(fontSize: AppTheme.microSize, color: Colors.amber.shade800)),
           ],
           const SizedBox(height: 10),
           ...options.map((opt) => Padding(
@@ -736,7 +734,7 @@ class _UpgradeCard extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
               opt.scans,
-              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+              style: TextStyle(fontSize: AppTheme.captionSize, color: Colors.grey[700]),
             ),
           )),
         ],

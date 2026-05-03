@@ -7,6 +7,14 @@ class AppTheme {
   static const Color warningColor = Color(0xFFEF6C00);
   static const Color surfaceColor = Color(0xFFF5F5F5);
 
+  // Typography scale
+  static const double heroSize = 24;
+  static const double sectionTitleSize = 16;
+  static const double cardTitleSize = 14;
+  static const double bodySize = 13;
+  static const double captionSize = 12;
+  static const double microSize = 11;
+
   static const Color shopeeOrange = Color(0xFFEE4D2D);
   static const Color tokopediaGreen = Color(0xFF42B549);
   static const Color tiktokBlack = Color(0xFF010101);
@@ -22,6 +30,8 @@ class AppTheme {
         return tiktokBlack;
       case 'Lazada':
         return lazadaBlue;
+      case 'Paxel':
+        return const Color(0xFF6C5CE7);
       case 'JNE':
         return const Color(0xFFD32F2F);
       case 'J&T':

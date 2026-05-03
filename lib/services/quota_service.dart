@@ -178,9 +178,13 @@ class QuotaService {
   Future<void> _autoRollFreeCycleIfNeeded() async {
     await _ensureCycleInitialized();
     final tier = await getTier();
-    final active = await isSubscriptionActive();
     // Only roll for free-tier users or expired subscription users
-    if (tier != StorageTier.free && active) return;
+    if (tier != StorageTier.free) {
+      // Check expiry without calling isSubscriptionActive (avoids infinite recursion)
+      final prefs = await SharedPreferences.getInstance();
+      final endMs = prefs.getInt(_userKey(_cycleEndKey));
+      if (endMs != null && DateTime.now().millisecondsSinceEpoch < endMs) return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     final startMs = prefs.getInt(_userKey(_cycleStartKey)) ?? 0;
@@ -230,7 +234,6 @@ class QuotaService {
   }
 
   Future<bool> isSubscriptionActive() async {
-    await _autoRollFreeCycleIfNeeded();
     final tier = await getTier();
     if (tier == StorageTier.free) return true;
     final end = await getActiveUntil();
@@ -312,9 +315,9 @@ class QuotaService {
 
   Future<int> getUsedBytes() async {
     final userId = _supabase.currentUser?.id;
-    final orders = await _db.getAllOrders(userId: userId);
+    final scans = await _db.getAllScans(userId: userId);
     int total = 0;
-    for (final order in orders) {
+    for (final order in scans) {
       final path = order.photoPath;
       if (path != null) {
         try {

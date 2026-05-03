@@ -7,7 +7,7 @@ import '../core/supabase/supabase_service.dart';
 import '../core/db/database_helper.dart';
 
 /// Task yang perlu di-sync ke Supabase
-enum SyncTaskType { insertOrder, uploadPhoto, syncSubscription, insertOrderCategory }
+enum SyncTaskType { insertScan, uploadPhoto, syncSubscription, insertScanCategory }
 
 class SyncTask {
   final String id;
@@ -159,7 +159,7 @@ class SyncQueue {
 
     try {
       switch (task.type) {
-        case SyncTaskType.insertOrder:
+        case SyncTaskType.insertScan:
           success = await _processInsertOrder(task);
           break;
         case SyncTaskType.uploadPhoto:
@@ -168,7 +168,7 @@ class SyncQueue {
         case SyncTaskType.syncSubscription:
           success = await _processSyncSubscription(task);
           break;
-        case SyncTaskType.insertOrderCategory:
+        case SyncTaskType.insertScanCategory:
           success = await _processInsertOrderCategory(task);
           break;
       }
@@ -192,17 +192,38 @@ class SyncQueue {
 
     final p = task.payload;
     try {
-      await client.from('scans').insert({
+      // Don't set photo_url here — uploadPhoto task will update it after upload
+      // This prevents stale local paths in Supabase if photo upload fails later
+      final photoUrl = p['photo_url'] as String?;
+      final isCloudUrl = photoUrl != null && photoUrl.startsWith('http');
+      final row = {
         'device_id': p['device_id'] ?? 'unknown',
         'user_id': p['user_id'],
         'resi': p['resi'],
         'marketplace': p['marketplace'],
         'scanned_at': int.tryParse(p['scanned_at']?.toString() ?? '0') ?? 0,
         'date': p['date'],
-        'photo_url': p['photo_url'],
+        'photo_url': isCloudUrl ? photoUrl : null, // only set if already a cloud URL
         'team_id': p['team_id'],
         'scanned_by': p['scanned_by'],
-      });
+      };
+      final teamId = p['team_id'];
+      final resi = p['resi'] as String?;
+      final userId = p['user_id'] as String?;
+      if (resi != null) {
+        final existing = teamId != null
+            ? await client.from('scans').select('id').eq('team_id', teamId).eq('resi', resi).limit(1)
+            : await client.from('scans').select('id').eq('user_id', userId ?? '').eq('resi', resi).limit(1);
+        if ((existing as List).isNotEmpty) {
+          await DatabaseHelper.instance.updateOrderSyncStatusByResi(resi, 'duplicate_conflict', userId: userId, teamId: teamId as String?);
+          debugPrint('[SyncQueue] insertScan: duplicate conflict detected for resi=$resi, teamId=$teamId');
+          return true;
+        }
+      }
+      await client.from('scans').insert(row);
+      if (resi != null) {
+        await DatabaseHelper.instance.updateOrderSyncStatusByResi(resi, 'synced', userId: userId, teamId: teamId as String?);
+      }
       // Also insert scan_categories if category_id is present (map local int -> Supabase UUID)
       final categoryId = p['category_id'];
       if (categoryId != null) {
@@ -217,7 +238,7 @@ class SyncQueue {
             if (localCat != null) {
               final ownerUserId = localCat.userId ?? SupabaseService().currentUser?.id;
               if (ownerUserId == null) {
-                debugPrint('[SyncQueue] insertOrder: cannot resolve ownerUserId for category ${localCat.name}');
+                debugPrint('[SyncQueue] insertScan: cannot resolve ownerUserId for category ${localCat.name}');
                 return true; // do not fail the whole task
               }
               final catRows = await client
@@ -229,26 +250,33 @@ class SyncQueue {
               final catList = List<Map<String, dynamic>>.from(catRows);
               if (catList.isNotEmpty) {
                 final catUuid = catList.first['id'];
-                debugPrint('[SyncQueue] insertOrder: inserting scan_categories scan_id=$scanId, category_uuid=$catUuid (from local id=$categoryId)');
-                await client.from('scan_categories').insert({
+                debugPrint('[SyncQueue] insertScan: inserting scan_categories scan_id=$scanId, category_uuid=$catUuid (from local id=$categoryId)');
+                await client.from('scan_categories').upsert({
                   'scan_id': scanId,
                   'category_id': catUuid,
-                });
-                debugPrint('[SyncQueue] insertOrder: scan_categories inserted OK');
+                }, onConflict: 'scan_id,category_id');
+                debugPrint('[SyncQueue] insertScan: scan_categories inserted OK');
               } else {
-                debugPrint('[SyncQueue] insertOrder: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
+                debugPrint('[SyncQueue] insertScan: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
               }
             } else {
-              debugPrint('[SyncQueue] insertOrder: local category not found id=$categoryId');
+              debugPrint('[SyncQueue] insertScan: local category not found id=$categoryId');
             }
           }
         } catch (e2) {
-          debugPrint('[SyncQueue] insertOrder: scan_categories error: $e2');
+          debugPrint('[SyncQueue] insertScan: scan_categories error: $e2');
         }
       }
       return true;
     } catch (e) {
-      debugPrint('[SyncQueue] insertOrder error: $e');
+      final p = task.payload;
+      final resi = p['resi'] as String?;
+      if (resi != null && e.toString().contains('23505')) {
+        await DatabaseHelper.instance.updateOrderSyncStatusByResi(resi, 'duplicate_conflict', userId: p['user_id'] as String?, teamId: p['team_id'] as String?);
+        debugPrint('[SyncQueue] insertScan: duplicate conflict from database for resi=$resi');
+        return true;
+      }
+      debugPrint('[SyncQueue] insertScan error: $e');
       return false;
     }
   }
@@ -272,12 +300,12 @@ class SyncQueue {
         // Resolve Supabase category UUID by local category name + owner
         final localCat = await DatabaseHelper.instance.getCategoryById(categoryId as int);
         if (localCat == null) {
-          debugPrint('[SyncQueue] insertOrderCategory: local category not found id=$categoryId');
+          debugPrint('[SyncQueue] insertScanCategory: local category not found id=$categoryId');
           return false;
         }
         final ownerUserId = localCat.userId ?? SupabaseService().currentUser?.id;
         if (ownerUserId == null) {
-          debugPrint('[SyncQueue] insertOrderCategory: cannot resolve ownerUserId for category ${localCat.name}');
+          debugPrint('[SyncQueue] insertScanCategory: cannot resolve ownerUserId for category ${localCat.name}');
           return false;
         }
         final catRows = await client
@@ -287,20 +315,23 @@ class SyncQueue {
             .eq('name', localCat.name)
             .limit(1) as List<dynamic>;
         if (catRows.isEmpty) {
-          debugPrint('[SyncQueue] insertOrderCategory: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
+          debugPrint('[SyncQueue] insertScanCategory: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
           return false;
         }
         final catUuid = catRows.first['id'];
-        await client.from('scan_categories').upsert({
-          'scan_id': scanId,
-          'category_id': catUuid,
-        });
+        await client.from('scan_categories').upsert(
+          {
+            'scan_id': scanId,
+            'category_id': catUuid,
+          },
+          onConflict: 'scan_id,category_id',
+        );
         return true;
       }
       // Scan not found yet, retry later
       return false;
     } catch (e) {
-      debugPrint('[SyncQueue] insertOrderCategory error: $e');
+      debugPrint('[SyncQueue] insertScanCategory error: $e');
       return false;
     }
   }
@@ -308,53 +339,107 @@ class SyncQueue {
   Future<bool> _processUploadPhoto(SyncTask task) async {
     final p = task.payload;
     final localPath = p['local_path'] as String?;
-    if (localPath == null) return false;
+    if (localPath == null) {
+      debugPrint('[SyncQueue] uploadPhoto: local_path is null');
+      return false;
+    }
 
     final file = File(localPath);
     if (!file.existsSync()) {
       // File sudah dihapus, skip
+      debugPrint('[SyncQueue] uploadPhoto: file not found, skipping');
       final db = await _getQueueDb();
       await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
       return true;
     }
 
     final userId = p['user_id'] as String?;
+    final resi = p['resi'] as String?;
     final fileName = p['cloud_filename'] as String? ??
         '${userId ?? 'anon'}/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
+    debugPrint('[SyncQueue] uploadPhoto: uploading file=$localPath, fileName=$fileName, resi=$resi');
+
     final url = await _supabase.uploadPhoto(file, fileName);
-    if (url != null) {
-      // Update photo_url di Supabase scans table
-      final client = _supabase.client;
-      if (client != null && p['resi'] != null) {
-        try {
+    if (url == null) {
+      debugPrint('[SyncQueue] uploadPhoto: upload failed, url is null');
+      return false;
+    }
+
+    debugPrint('[SyncQueue] uploadPhoto: upload success, url=$url');
+    final client = _supabase.client;
+    bool supabaseUpdated = false;
+
+    if (client != null && resi != null) {
+      try {
+        // Check if scan row exists in Supabase
+        final existing = await client
+            .from('scans')
+            .select('id')
+            .eq('resi', resi)
+            .limit(1);
+
+        if ((existing as List).isEmpty) {
+          debugPrint('[SyncQueue] uploadPhoto: scan row not found for resi=$resi, re-enqueue insertScan with cloud URL');
+          // Scan row doesn't exist — enqueue insertScan with the cloud URL
+          await enqueue(SyncTaskType.insertScan, {
+            'device_id': 'pending',
+            'user_id': userId,
+            'resi': resi,
+            'marketplace': p['marketplace'] ?? 'unknown',
+            'scanned_at': p['scanned_at'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+            'date': p['date'] ?? '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}',
+            'photo_url': url, // already cloud URL
+            'team_id': p['team_id'],
+            'scanned_by': userId,
+          });
+          supabaseUpdated = true; // will be handled by insertScan
+        } else {
+          // Update photo_url in Supabase
           await client
               .from('scans')
               .update({'photo_url': url})
-              .eq('resi', p['resi'] as String);
-        } catch (e) {
-          debugPrint('[SyncQueue] Update photo_url in Supabase error: $e');
-          // Don't mark as success — retry later
-          return false;
+              .eq('resi', resi);
+          debugPrint('[SyncQueue] uploadPhoto: updated photo_url in Supabase for resi=$resi');
+          supabaseUpdated = true;
         }
+      } catch (e) {
+        debugPrint('[SyncQueue] uploadPhoto: Supabase update error: $e');
+        // CRITICAL: Don't update local DB if Supabase update failed
+        // This prevents the stale mismatch where local has cloud URL but Supabase has local path
+        return false;
       }
-      // Update photo_path di DB lokal ke cloud URL
+    }
+
+    // Only update local DB AFTER Supabase is successfully updated
+    // This ensures we don't lose the local path reference if Supabase update fails
+    if (supabaseUpdated) {
       try {
         final dbHelper = DatabaseHelper.instance;
-        final orders = await dbHelper.getAllOrders(userId: userId);
-        for (final o in orders) {
+        final scans = await dbHelper.getAllScans(userId: userId);
+        for (final o in scans) {
           if (o.photoPath == localPath && o.id != null) {
-            await dbHelper.updateOrderPhoto(o.id!, url);
-            debugPrint('[SyncQueue] Updated local photo_path to cloud URL for resi=${o.resi}');
+            await dbHelper.updateScanPhoto(o.id!, url);
+            debugPrint('[SyncQueue] uploadPhoto: Updated local photo_path to cloud URL for resi=${o.resi}');
+            break;
+          }
+        }
+        // Also check team scans
+        final teamOrders = await dbHelper.getTeamScans();
+        for (final o in teamOrders) {
+          if (o.photoPath == localPath && o.id != null) {
+            await dbHelper.updateScanPhoto(o.id!, url);
+            debugPrint('[SyncQueue] uploadPhoto: Updated local team photo_path to cloud URL for resi=${o.resi}');
             break;
           }
         }
       } catch (e) {
-        debugPrint('[SyncQueue] Update local photo_path error: $e');
+        debugPrint('[SyncQueue] uploadPhoto: Update local photo_path error: $e');
+        // Non-critical: Supabase is already updated, local will catch up on next load
       }
-      return true;
     }
-    return false;
+
+    return supabaseUpdated;
   }
 
   Future<bool> _processSyncSubscription(SyncTask task) async {

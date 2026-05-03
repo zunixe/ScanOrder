@@ -136,11 +136,11 @@ class _ScanPageState extends State<ScanPage> {
         final file = File('${dir.path}/$fileName');
         final compress = context.read<SettingsProvider>().compressPhoto;
         if (compress) {
-          // Compress: resize max 1280px, quality 80%
+          // Compress: resize max 1280px, quality 85%
           final image = img.decodeImage(capture.image!);
           if (image != null) {
-            final resized = img.copyResize(image, width: image.width > image.height ? 1280 : null, height: image.height >= image.width ? 1280 : null);
-            final compressed = img.encodeJpg(resized, quality: 80);
+            final resized = img.copyResize(image, width: compress ? 1280 : null, height: compress ? 1280 : null);
+            final compressed = img.encodeJpg(resized, quality: 85);
             await file.writeAsBytes(compressed);
           } else {
             await file.writeAsBytes(capture.image!);
@@ -516,7 +516,7 @@ class _ScanPageState extends State<ScanPage> {
                   const SizedBox(width: 12),
                   Text(
                     cat.name,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: AppTheme.cardTitleSize, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -647,7 +647,7 @@ class _ScanPageState extends State<ScanPage> {
                           'ScanOrder',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 20,
+                            fontSize: AppTheme.sectionTitleSize,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -655,7 +655,7 @@ class _ScanPageState extends State<ScanPage> {
                           'Hari ini: ${provider.todayCount} scan',
                           style: const TextStyle(
                             color: Colors.white70,
-                            fontSize: 13,
+                            fontSize: AppTheme.bodySize,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -668,7 +668,7 @@ class _ScanPageState extends State<ScanPage> {
                             ),
                             child: const Text(
                               'Anggota Tim',
-                              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                              style: TextStyle(color: Colors.white, fontSize: AppTheme.microSize, fontWeight: FontWeight.w600),
                             ),
                           )
                         else if (provider.scanLimit >= 0)
@@ -678,7 +678,7 @@ class _ScanPageState extends State<ScanPage> {
                               color: provider.remainingScans <= 10 && provider.scanLimit > 0
                                   ? Colors.orangeAccent
                                   : Colors.white70,
-                              fontSize: 13,
+                              fontSize: AppTheme.bodySize,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -699,7 +699,7 @@ class _ScanPageState extends State<ScanPage> {
                             'Total: ${provider.totalCount}',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12,
+                              fontSize: AppTheme.captionSize,
                               fontWeight: FontWeight.w500,
                             ),
                           ),

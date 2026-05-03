@@ -17,9 +17,9 @@ import '../stats/stats_provider.dart';
 import '../subscription/subscription_provider.dart';
 import 'settings_provider.dart';
 
-const _settingsTitleStyle = TextStyle(fontSize: 14, fontWeight: FontWeight.w600);
-const _settingsSubtitleStyle = TextStyle(fontSize: 12, color: Colors.grey);
-const _settingsSectionStyle = TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey);
+const _settingsTitleStyle = TextStyle(fontSize: AppTheme.cardTitleSize, fontWeight: FontWeight.w600);
+const _settingsSubtitleStyle = TextStyle(fontSize: AppTheme.captionSize, color: Colors.grey);
+const _settingsSectionStyle = TextStyle(fontSize: AppTheme.bodySize, fontWeight: FontWeight.w600, color: Colors.grey);
 const _settingsTilePadding = EdgeInsets.symmetric(horizontal: 16, vertical: 2);
 
 class SettingsPage extends StatefulWidget {
@@ -120,7 +120,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   dense: true,
                   contentPadding: _settingsTilePadding,
                   leading: const Icon(Icons.logout, color: Colors.red),
-                  title: const Text('Logout', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.red)),
+                  title: const Text('Logout', style: TextStyle(fontSize: AppTheme.cardTitleSize, fontWeight: FontWeight.w600, color: Colors.red)),
                   onTap: () => _showLogoutDialog(auth),
                 ),
 
@@ -144,8 +144,8 @@ class _SettingsPageState extends State<SettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('ScanOrder', style: TextStyle(fontSize: 18)),
-                Text('v$_appVersion', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                const Text('ScanOrder', style: TextStyle(fontSize: AppTheme.cardTitleSize, fontWeight: FontWeight.bold)),
+                Text('v$_appVersion', style: TextStyle(fontSize: AppTheme.captionSize, color: Colors.grey[600])),
               ],
             ),
           ],
@@ -339,7 +339,7 @@ class _ProfileSection extends StatelessWidget {
             backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.15),
             child: Text(
               initials,
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
+              style: const TextStyle(fontSize: AppTheme.heroSize, fontWeight: FontWeight.bold, color: AppTheme.primaryColor),
             ),
           ),
           const SizedBox(width: 16),
@@ -359,7 +359,7 @@ class _ProfileSection extends StatelessWidget {
                       ),
                       child: Text(
                         _tierLabel,
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _tierColor),
+                        style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.w600, color: _tierColor),
                       ),
                     ),
                     if (!auth.isLoggedIn) ...[
@@ -582,7 +582,7 @@ class _TeamSection extends StatelessWidget {
         title: const Text('Keluar dari Tim'),
         content: Text(isAdmin
             ? (memberCount > 0
-                ? 'Sebagai admin, peran admin akan ditransfer ke anggota tertua. Lanjutkan?'
+                ? 'Keluarkan semua anggota tim terlebih dahulu sebelum keluar.'
                 : 'Tim akan dibubarkan karena kamu satu-satunya anggota. Lanjutkan?')
             : 'Kamu akan keluar dari tim "${auth.currentTeam?.name ?? ''}". Tampilan akan kembali ke data pribadimu. Lanjutkan?'),
         actions: [
@@ -780,9 +780,9 @@ class _SyncSection extends StatelessWidget {
                 final userId = SupabaseService().currentUser?.id;
                 final syncQueue = SyncQueue();
                 if (userId != null) {
-                  final orders = await db.getAllOrders(userId: userId);
+                  final scans = await db.getAllScans(userId: userId);
                   int reEnqueued = 0;
-                  for (final o in orders) {
+                  for (final o in scans) {
                     if (o.photoPath != null &&
                         o.photoPath!.isNotEmpty &&
                         !o.photoPath!.startsWith('http') &&
@@ -808,7 +808,7 @@ class _SyncSection extends StatelessWidget {
                       for (final s in badScans) {
                         final resi = s['resi'] as String;
                         // Find matching local order with cloud URL
-                        final match = orders.where((o) => o.resi == resi && o.photoPath != null && o.photoPath!.startsWith('http')).firstOrNull;
+                        final match = scans.where((o) => o.resi == resi && o.photoPath != null && o.photoPath!.startsWith('http')).firstOrNull;
                         if (match != null) {
                           await client.from('scans').update({'photo_url': match.photoPath}).eq('resi', resi);
                           reEnqueued++;
@@ -889,12 +889,31 @@ class _SyncSection extends StatelessWidget {
                 // Clear Supabase
                 final client = SupabaseService().client;
                 if (client != null && userId != null) {
-                  // Delete user's scan_categories via resi matching
-                  final userScans = await client.from('scans').select('id').eq('user_id', userId);
+                  // 1. Get all photo URLs for this user before deleting scans
+                  final userScans = await client.from('scans').select('id, photo_url').eq('user_id', userId);
+                  
+                  // 2. Delete scan_categories
                   for (final s in userScans) {
                     await client.from('scan_categories').delete().eq('scan_id', s['id']);
                   }
+                  
+                  // 3. Delete scans
                   await client.from('scans').delete().eq('user_id', userId);
+                  
+                  // 4. Delete photos from Storage
+                  try {
+                    final storage = client.storage.from('scan-photos');
+                    // List all files in user's folder
+                    final files = await storage.list(path: userId);
+                    if (files.isNotEmpty) {
+                      final filePaths = files.map((f) => '$userId/${f.name}').toList();
+                      await storage.remove(filePaths);
+                      debugPrint('[Settings] Deleted ${filePaths.length} photos from storage for user $userId');
+                    }
+                  } catch (e) {
+                    debugPrint('[Settings] Failed to delete storage photos: $e');
+                  }
+                  
                   await client.from('user_subscriptions').update({'cycle_used': 0}).eq('user_id', userId);
                 }
                 // Refresh providers

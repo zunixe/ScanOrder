@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../services/marketplace_detector.dart';
 import '../../services/quota_service.dart';
@@ -15,7 +15,7 @@ class ScanResult {
   final ScanStatus status;
   final String resi;
   final String marketplace;
-  final ScannedOrder? existingOrder;
+  final ScanRecord? existingOrder;
 
   ScanResult({
     required this.status,
@@ -248,7 +248,8 @@ class ScanProvider extends ChangeNotifier {
       // Check duplicate: scoped per category if active, else per user
       final userId = SupabaseService().currentUser?.id;
       // In team mode, scans belong to admin — use admin's user_id for ownership
-      final scanOwnerId = _teamId != null && _adminUserId != null ? _adminUserId! : userId!;
+      // Free users (not logged in) use null — local-only storage
+      final scanOwnerId = _teamId != null && _adminUserId != null ? _adminUserId! : userId;
       if (activeCategoryId != null) {
         // Dalam kategori: cek duplikat hanya di kategori itu
         final alreadyInCategory = await _db.isOrderInCategory(resi, activeCategoryId!, userId: userId);
@@ -318,7 +319,7 @@ class ScanProvider extends ChangeNotifier {
       }
 
       // Insert new order with photo
-      final order = ScannedOrder(
+      final order = ScanRecord(
         resi: resi,
         marketplace: marketplace,
         scannedAt: now,
@@ -326,23 +327,23 @@ class ScanProvider extends ChangeNotifier {
         photoPath: photoPath,
       );
 
-      // Jika kategori aktif, cek apakah order sudah ada di tabel orders (boleh sama resi di kategori lain)
-      // Jika belum ada di orders, insert dulu; jika sudah ada, reuse order_id-nya
+      // Jika kategori aktif, cek apakah order sudah ada di tabel scans (boleh sama resi di kategori lain)
+      // Jika belum ada di scans, insert dulu; jika sudah ada, reuse order_id-nya
       int orderId;
       if (activeCategoryId != null) {
         final existingOrder = await _db.findByResi(resi, userId: scanOwnerId);
         if (existingOrder != null) {
           orderId = existingOrder.id!;
         } else {
-          orderId = await _db.insertOrder(order, userId: scanOwnerId, teamId: teamId, scannedBy: userId);
+          orderId = await _db.insertScan(order, userId: scanOwnerId, teamId: teamId, scannedBy: userId);
         }
         // Assign ke kategori aktif (UNIQUE order_id, category_id mencegah duplikat dalam kategori)
         final ocId = await _db.assignCategoryToOrder(orderId, activeCategoryId!);
         debugPrint('[ScanProvider] assigned local category: ocId=$ocId, orderId=$orderId, categoryId=$activeCategoryId');
         // Sync category assignment to Supabase via queue (reliable, with retry)
-        // Don't use Future.microtask — race condition with insertOrder
+        // Don't use Future.microtask — race condition with insertScan
       } else {
-        orderId = await _db.insertOrder(order, userId: scanOwnerId, teamId: teamId, scannedBy: userId);
+        orderId = await _db.insertScan(order, userId: scanOwnerId, teamId: teamId, scannedBy: userId);
       }
       // Jangan kurangi quota pribadi jika user anggota tim (tim = unlimited)
       if (teamId == null) await _quota.consumeScan();
@@ -389,7 +390,7 @@ class ScanProvider extends ChangeNotifier {
           });
         }
         // Enqueue order insert (photo_url will be updated after upload)
-        queue.enqueue(SyncTaskType.insertOrder, {
+        queue.enqueue(SyncTaskType.insertScan, {
           'device_id': 'pending', // will be resolved by queue
           'user_id': scanOwnerId,
           'resi': resi,
@@ -401,14 +402,14 @@ class ScanProvider extends ChangeNotifier {
           'scanned_by': userId,
           'category_id': activeCategoryId,
         });
-        debugPrint('[ScanProvider] enqueued insertOrder for resi=$resi, teamId=$teamId');
-        // Enqueue order-category relation after insertOrder; processor will retry until scan exists
+        debugPrint('[ScanProvider] enqueued insertScan for resi=$resi, teamId=$teamId');
+        // Enqueue order-category relation after insertScan; processor will retry until scan exists
         if (activeCategoryId != null) {
-          queue.enqueue(SyncTaskType.insertOrderCategory, {
+          queue.enqueue(SyncTaskType.insertScanCategory, {
             'resi': resi,
             'category_id': activeCategoryId,
           });
-          debugPrint('[ScanProvider] enqueued insertOrderCategory for resi=$resi, categoryId=$activeCategoryId');
+          debugPrint('[ScanProvider] enqueued insertScanCategory for resi=$resi, categoryId=$activeCategoryId');
         }
         // Note: subscription sync is handled by consumeScan() → syncToCloud()
         // Do NOT enqueue syncSubscription here with placeholder data,
@@ -416,8 +417,9 @@ class ScanProvider extends ChangeNotifier {
       }
 
       return lastResult;
-    } catch (e) {
-      debugPrint('[ScanProvider] error: $e');
+    } catch (e, stack) {
+      debugPrint('[ScanProvider] processScan error: $e\n$stack');
+      _processing = false;
       return null;
     } finally {
       _processing = false;

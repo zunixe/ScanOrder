@@ -20,6 +20,16 @@ class MarketplaceDetector {
       return 'Tokopedia';
     }
 
+    // Tokopedia/Gojek pickup labels often only barcode the Tokopedia order number
+    if (RegExp(r'^\d{15,20}$').hasMatch(upper)) {
+      return 'Tokopedia';
+    }
+
+    // Paxel - Tokopedia/Shopee Paxel shipment code
+    if (upper.startsWith('TSPX')) {
+      return 'Paxel';
+    }
+
     // JNE — berbagai prefix layanan JNE
     if (RegExp(r'^(JN|TLJN|CGK|BDO|SUB|SRG|MDN|UPG|MKS|YGY|PLM|BPN|BTH|CM|OK|MG|MP|CL|IN)\d').hasMatch(upper) ||
         upper.startsWith('JNE')) {
@@ -75,9 +85,6 @@ class MarketplaceDetector {
     // Tolak URL
     if (trimmed.startsWith('http') || trimmed.contains('://')) return false;
 
-    // Tolak angka murni panjang (Order ID Tokopedia/Shopee: 15-20 digit)
-    if (RegExp(r'^\d{15,}$').hasMatch(trimmed)) return false;
-
     // Tolak angka murni pendek (< 8 digit, bukan resi)
     if (RegExp(r'^\d{1,7}$').hasMatch(trimmed)) return false;
 
@@ -96,6 +103,7 @@ class MarketplaceDetector {
     'Tokopedia',
     'TikTok',
     'Lazada',
+    'Paxel',
     'JNE',
     'J&T',
     'SiCepat',

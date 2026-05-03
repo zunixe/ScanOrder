@@ -86,7 +86,7 @@ class _StatsPageState extends State<StatsPage> {
                     const Text(
                       'Scan per Hari',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: AppTheme.sectionTitleSize,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -235,10 +235,75 @@ class _StatsPageState extends State<StatsPage> {
                     (e) => _CategoryRow(
                       name: e.key,
                       count: e.value,
-                      total: provider.totalScans,
+                      total: provider.categoryStats.values.fold(0, (a, b) => a + b),
                     ),
                   ),
                 ],
+
+                const SizedBox(height: 24),
+
+                // Storage bar chart
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.bar_chart,
+                              color: AppTheme.primaryColor,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Chart Penyimpanan',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        if (provider.dbSizeBytes == 0 && provider.photoSizeBytes == 0 && provider.cloudDbSizeBytes == 0 && provider.cloudPhotoSizeBytes == 0)
+                          const SizedBox(
+                            height: 80,
+                            child: Center(
+                              child: Text('Belum ada data penyimpanan', style: TextStyle(color: Colors.grey)),
+                            ),
+                          )
+                        else
+                        SizedBox(
+                          height: 170,
+                          child: _StorageBarChart(
+                            localDb: provider.dbSizeBytes,
+                            localPhoto: provider.photoSizeBytes,
+                            cloudDb: provider.cloudDbSizeBytes,
+                            cloudPhoto: provider.cloudPhotoSizeBytes,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _StorageLegend(
+                              color: Colors.blue,
+                              label: 'Lokal',
+                              value: provider.formattedTotalSize,
+                            ),
+                            _StorageLegend(
+                              color: AppTheme.primaryColor,
+                              label: 'Cloud',
+                              value: provider.formattedCloudTotalSize,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
                 const SizedBox(height: 24),
 
@@ -280,15 +345,15 @@ class _StatsPageState extends State<StatsPage> {
                               children: [
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text('', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+                                  child: Text('', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Colors.grey[600])),
                                 ),
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text('Lokal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
+                                  child: Text('Lokal', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
                                 ),
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text('Cloud', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
+                                  child: Text('Cloud', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
                                 ),
                               ],
                             ),
@@ -412,7 +477,7 @@ class _StatsPageState extends State<StatsPage> {
                             const Text(
                               'Status Sync',
                               style: TextStyle(
-                                fontSize: 14,
+                                fontSize: AppTheme.sectionTitleSize,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -456,22 +521,25 @@ class _StatsPageState extends State<StatsPage> {
                           ),
                         ),
                         const Divider(height: 16),
-                        _SyncRow(
-                          label: 'Kategori Tersinkron ke Cloud',
-                          value: '${provider.syncedCategories}',
-                          total: provider.syncedCategories + provider.unsyncedCategories,
-                          synced: provider.syncedCategories,
-                          icon: Icons.label_outlined,
-                        ),
-                        const Divider(height: 16),
-                        _SyncRow(
-                          label: 'Kategori Belum Sinkron',
-                          value: '${provider.unsyncedCategories}',
-                          total: provider.syncedCategories + provider.unsyncedCategories,
-                          synced: provider.unsyncedCategories,
-                          icon: Icons.label_off_outlined,
-                          isWarning: provider.unsyncedCategories > 0,
-                        ),
+                        if (sub.currentTier == StorageTier.unlimited || auth!.isTeamMember) ...[
+                          _SyncRow(
+                            label: 'Kategori Tersinkron ke Cloud',
+                            value: '${provider.syncedCategories}',
+                            total: provider.syncedCategories + provider.unsyncedCategories,
+                            synced: provider.syncedCategories,
+                            icon: Icons.label_outlined,
+                          ),
+                          const Divider(height: 16),
+                          _SyncRow(
+                            label: 'Kategori Belum Sinkron',
+                            value: '${provider.unsyncedCategories}',
+                            total: provider.syncedCategories + provider.unsyncedCategories,
+                            synced: provider.unsyncedCategories,
+                            icon: Icons.label_off_outlined,
+                            isWarning: provider.unsyncedCategories > 0,
+                          ),
+                          const Divider(height: 16),
+                        ],
                         if (provider.pendingQueueCount > 0) ...[
                           const Divider(height: 16),
                           Row(
@@ -499,13 +567,63 @@ class _StatsPageState extends State<StatsPage> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: () async {
-                        // Re-enqueue unsynced photos
+                        // Re-enqueue unsynced scans AND photos
                         final db = DatabaseHelper.instance;
                         final userId = SupabaseService().currentUser?.id;
                         final syncQueue = SyncQueue();
                         if (userId != null) {
-                          final orders = await db.getAllOrders(userId: userId);
-                          for (final o in orders) {
+                          final supabase = SupabaseService();
+                          final client = supabase.client;
+                          final teamId = provider.teamId;
+
+                          // Get full scan data from Supabase (including photo_url)
+                          final Set<String> cloudResis = {};
+                          final Map<String, String> cloudPhotoUrls = {}; // resi -> photo_url
+                          if (client != null) {
+                            try {
+                              final response = teamId != null
+                                  ? await client.from('scans').select('resi, photo_url').eq('team_id', teamId)
+                                  : await client.from('scans').select('resi, photo_url').eq('user_id', userId);
+                              for (final row in response) {
+                                final resi = row['resi'] as String;
+                                cloudResis.add(resi);
+                                cloudPhotoUrls[resi] = (row['photo_url'] as String?) ?? '';
+                              }
+                            } catch (e) {
+                              debugPrint('[Stats] Failed to fetch cloud scans: $e');
+                            }
+                          }
+
+                          // For team mode, use getTeamScans(); for personal, use getAllScans()
+                          final scans = teamId != null
+                              ? await db.getTeamScans()
+                              : await db.getAllScans(userId: userId);
+
+                          // Build local resi -> photoPath map
+                          final Map<String, String?> localPhotoPaths = {};
+                          for (final o in scans) {
+                            localPhotoPaths[o.resi] = o.photoPath;
+                          }
+
+                          for (final o in scans) {
+                            final isMissingFromCloud = !cloudResis.contains(o.resi);
+
+                            // Re-enqueue insertScan for scans missing from Supabase
+                            if (isMissingFromCloud) {
+                              syncQueue.enqueue(SyncTaskType.insertScan, {
+                                'device_id': 'pending',
+                                'user_id': userId,
+                                'resi': o.resi,
+                                'marketplace': o.marketplace,
+                                'scanned_at': o.scannedAt.millisecondsSinceEpoch.toString(),
+                                'date': o.date,
+                                'photo_url': o.photoPath,
+                                'team_id': teamId,
+                                'scanned_by': userId,
+                              });
+                            }
+
+                            // Re-enqueue photo upload for local photos
                             if (o.photoPath != null &&
                                 o.photoPath!.isNotEmpty &&
                                 !o.photoPath!.startsWith('http') &&
@@ -516,6 +634,66 @@ class _StatsPageState extends State<StatsPage> {
                                 'resi': o.resi,
                                 'cloud_filename': '$userId/${o.scannedAt.millisecondsSinceEpoch}.jpg',
                               });
+                            }
+                          }
+
+                          // Fix: scan exists in Supabase but photo_url is missing or still local path
+                          // If local DB already has cloud URL, update Supabase directly
+                          if (client != null) {
+                            for (final entry in cloudPhotoUrls.entries) {
+                              final resi = entry.key;
+                              final cloudPhotoUrl = entry.value;
+                              if (cloudPhotoUrl.isNotEmpty && !cloudPhotoUrl.startsWith('http')) {
+                                debugPrint('[Stats] Sync: found unsynced photo in cloud, resi=$resi, cloudPhotoUrl=$cloudPhotoUrl');
+                                // Cloud has local path — check if local DB has cloud URL
+                                final localPath = localPhotoPaths[resi];
+                                debugPrint('[Stats] Sync: localPath for resi=$resi is $localPath');
+                                if (localPath != null && localPath.startsWith('http')) {
+                                  // Local already synced, just update Supabase
+                                  try {
+                                    await client.from('scans').update({'photo_url': localPath}).eq('resi', resi);
+                                    debugPrint('[Stats] Fixed photo_url in Supabase for resi=$resi');
+                                  } catch (e) {
+                                    debugPrint('[Stats] Failed to fix photo_url for resi=$resi: $e');
+                                  }
+                                } else if (localPath != null && localPath.isNotEmpty && !localPath.startsWith('http') && File(localPath).existsSync()) {
+                                  // Local file still exists, re-enqueue upload
+                                  debugPrint('[Stats] Sync: re-enqueue upload for resi=$resi, localPath=$localPath');
+                                  syncQueue.enqueue(SyncTaskType.uploadPhoto, {
+                                    'local_path': localPath,
+                                    'user_id': userId,
+                                    'resi': resi,
+                                    'cloud_filename': '$userId/${DateTime.now().millisecondsSinceEpoch}.jpg',
+                                  });
+                                } else {
+                                  // Scan exists in Supabase with local photo_url, but no local file available
+                                  // This means the photo was never uploaded and the local file is gone
+                                  // Clear the stale local path in Supabase to fix the count
+                                  debugPrint('[Stats] Sync: no local file for resi=$resi, clearing stale photo_url in Supabase');
+                                  try {
+                                    await client.from('scans').update({'photo_url': null}).eq('resi', resi);
+                                    debugPrint('[Stats] Sync: cleared stale photo_url for resi=$resi');
+                                  } catch (e) {
+                                    debugPrint('[Stats] Sync: failed to clear photo_url for resi=$resi: $e');
+                                  }
+                                }
+                              }
+                            }
+                            // Also fix: cloud photo_url is null/empty but local has cloud URL
+                            for (final entry in cloudPhotoUrls.entries) {
+                              final resi = entry.key;
+                              final cloudPhotoUrl = entry.value;
+                              if ((cloudPhotoUrl.isEmpty) && localPhotoPaths.containsKey(resi)) {
+                                final localPath = localPhotoPaths[resi];
+                                if (localPath != null && localPath.startsWith('http')) {
+                                  try {
+                                    await client.from('scans').update({'photo_url': localPath}).eq('resi', resi);
+                                    debugPrint('[Stats] Sync: fixed null photo_url in Supabase for resi=$resi');
+                                  } catch (e) {
+                                    debugPrint('[Stats] Sync: failed to fix null photo_url for resi=$resi: $e');
+                                  }
+                                }
+                              }
                             }
                           }
                         }
@@ -552,7 +730,7 @@ class _StatsPageState extends State<StatsPage> {
           children: [
             Icon(Icons.photo_library_outlined, color: Colors.orange, size: 20),
             const SizedBox(width: 8),
-            const Text('Foto Belum Sinkron', style: TextStyle(fontSize: 16)),
+            const Text('Foto Belum Sinkron', style: TextStyle(fontSize: AppTheme.sectionTitleSize, fontWeight: FontWeight.bold)),
           ],
         ),
         content: SizedBox(
@@ -564,24 +742,40 @@ class _StatsPageState extends State<StatsPage> {
                   itemCount: provider.unsyncedPhotoResis.length,
                   itemBuilder: (_, i) {
                     final resi = provider.unsyncedPhotoResis[i];
+                    final photoPath = provider.unsyncedPhotoPaths[resi];
+                    final canOpen = photoPath != null && (photoPath.startsWith('http') || File(photoPath).existsSync());
                     return ListTile(
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 0),
                       leading: Icon(Icons.receipt_long, size: 18, color: Colors.orange.shade700),
-                      title: Text(resi, style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.copy, size: 18),
-                        tooltip: 'Salin',
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: resi));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Disalin: $resi'),
-                              duration: const Duration(seconds: 1),
-                              behavior: SnackBarBehavior.floating,
+                      title: Text(resi, style: const TextStyle(fontSize: AppTheme.bodySize, fontFamily: 'monospace')),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (canOpen)
+                            IconButton(
+                              icon: const Icon(Icons.image_outlined, size: 18),
+                              tooltip: 'Lihat Foto',
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _showPhotoViewer(context, photoPath!);
+                              },
                             ),
-                          );
-                        },
+                          IconButton(
+                            icon: const Icon(Icons.copy, size: 18),
+                            tooltip: 'Salin',
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: resi));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Disalin: $resi'),
+                                  duration: const Duration(seconds: 1),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -612,6 +806,32 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
+  void _showPhotoViewer(BuildContext context, String photoPath) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Foto Scan'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+          ),
+          body: InteractiveViewer(
+            child: Center(
+              child: photoPath.startsWith('http')
+                  ? Image.network(photoPath, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                  : File(photoPath).existsSync()
+                      ? Image.file(File(photoPath), fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                      : const Icon(Icons.broken_image, size: 64, color: Colors.grey),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLockedSection(BuildContext context) {
     return Card(
       color: Colors.grey[100],
@@ -623,13 +843,13 @@ class _StatsPageState extends State<StatsPage> {
             const SizedBox(height: 12),
             const Text(
               'Statistik Lengkap',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: AppTheme.sectionTitleSize, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(
               'Upgrade ke Basic atau lebih tinggi untuk melihat grafik, penyimpanan, dan breakdown marketplace.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              style: TextStyle(fontSize: AppTheme.bodySize, color: Colors.grey[600]),
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -674,7 +894,7 @@ class _SummaryCard extends StatelessWidget {
             Text(
               value,
               style: TextStyle(
-                fontSize: 28,
+                fontSize: AppTheme.heroSize,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
@@ -682,7 +902,7 @@ class _SummaryCard extends StatelessWidget {
             Text(
               title,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: AppTheme.captionSize,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
@@ -758,7 +978,7 @@ class _DailyBarChart extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
                       label,
-                      style: const TextStyle(fontSize: 9, color: Colors.grey),
+                      style: const TextStyle(fontSize: AppTheme.microSize, color: Colors.grey),
                     ),
                   );
                 }
@@ -829,7 +1049,7 @@ class _MarketplacePieChart extends StatelessWidget {
         color: color,
         title: pct >= 8 ? '${pct.toStringAsFixed(0)}%' : '',
         titleStyle: const TextStyle(
-          fontSize: 11,
+          fontSize: AppTheme.microSize,
           fontWeight: FontWeight.bold,
           color: Colors.white,
         ),
@@ -997,7 +1217,7 @@ class _CategoryPieChart extends StatelessWidget {
         color: color,
         title: pct >= 8 ? '${pct.toStringAsFixed(0)}%' : '',
         titleStyle: const TextStyle(
-          fontSize: 11,
+          fontSize: AppTheme.microSize,
           fontWeight: FontWeight.bold,
           color: Colors.white,
         ),
@@ -1011,6 +1231,161 @@ class _CategoryPieChart extends StatelessWidget {
         centerSpaceRadius: 30,
         sectionsSpace: 2,
       ),
+    );
+  }
+}
+
+class _StorageBarChart extends StatelessWidget {
+  final int localDb;
+  final int localPhoto;
+  final int cloudDb;
+  final int cloudPhoto;
+
+  const _StorageBarChart({
+    required this.localDb,
+    required this.localPhoto,
+    required this.cloudDb,
+    required this.cloudPhoto,
+  });
+
+  String _fmt(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1048576) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    return '${(bytes / 1048576).toStringAsFixed(1)}MB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final localTotal = localDb + localPhoto;
+    final cloudTotal = cloudDb + cloudPhoto;
+    final maxSize = [localTotal, cloudTotal].reduce((a, b) => a > b ? a : b);
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: maxSize > 0 ? maxSize * 1.2 : 100,
+        barTouchData: BarTouchData(enabled: false),
+        titlesData: FlTitlesData(
+          show: true,
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 40,
+              getTitlesWidget: (value, meta) {
+                final isLocal = value.toInt() == 0;
+                final total = isLocal ? localTotal : cloudTotal;
+                final label = isLocal ? 'Lokal' : 'Cloud';
+                final sizeStr = _fmt(total);
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      Text('Total: $sizeStr', style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+        gridData: FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        barGroups: [
+          BarChartGroupData(
+            x: 0,
+            barRods: [
+              BarChartRodData(
+                toY: localTotal.toDouble(),
+                color: Colors.blue[300],
+                width: 40,
+                borderRadius: BorderRadius.circular(4),
+                rodStackItems: [
+                  BarChartRodStackItem(
+                    0,
+                    localDb.toDouble(),
+                    Colors.blue[700]!,
+                  ),
+                  BarChartRodStackItem(
+                    localDb.toDouble(),
+                    localTotal.toDouble(),
+                    Colors.blue[300]!,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          BarChartGroupData(
+            x: 1,
+            barRods: [
+              BarChartRodData(
+                toY: cloudTotal.toDouble(),
+                color: AppTheme.primaryColor.withValues(alpha: 0.5),
+                width: 40,
+                borderRadius: BorderRadius.circular(4),
+                rodStackItems: [
+                  BarChartRodStackItem(
+                    0,
+                    cloudDb.toDouble(),
+                    AppTheme.primaryColor,
+                  ),
+                  BarChartRodStackItem(
+                    cloudDb.toDouble(),
+                    cloudTotal.toDouble(),
+                    AppTheme.primaryColor.withValues(alpha: 0.5),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StorageLegend extends StatelessWidget {
+  final Color color;
+  final String label;
+  final String value;
+
+  const _StorageLegend({
+    required this.color,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

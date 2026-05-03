@@ -1,6 +1,6 @@
 import 'category.dart';
 
-class ScannedOrder {
+class ScanRecord {
   final int? id;
   final String resi;
   final String marketplace;
@@ -8,8 +8,9 @@ class ScannedOrder {
   final String date; // YYYY-MM-DD
   final String? photoPath; // Path to captured photo
   final List<ScanCategory> categories;
+  final String syncStatus;
 
-  ScannedOrder({
+  ScanRecord({
     this.id,
     required this.resi,
     required this.marketplace,
@@ -17,6 +18,7 @@ class ScannedOrder {
     required this.date,
     this.photoPath,
     this.categories = const [],
+    this.syncStatus = 'pending',
   });
 
   Map<String, dynamic> toMap() {
@@ -27,22 +29,24 @@ class ScannedOrder {
       'scanned_at': scannedAt.millisecondsSinceEpoch,
       'date': date,
       'photo_path': photoPath,
+      'sync_status': syncStatus,
     };
   }
 
-  factory ScannedOrder.fromMap(Map<String, dynamic> map) {
-    return ScannedOrder(
+  factory ScanRecord.fromMap(Map<String, dynamic> map) {
+    return ScanRecord(
       id: map['id'] as int?,
       resi: map['resi'] as String,
       marketplace: map['marketplace'] as String,
       scannedAt: DateTime.fromMillisecondsSinceEpoch(map['scanned_at'] as int),
       date: map['date'] as String,
       photoPath: map['photo_path'] as String?,
+      syncStatus: (map['sync_status'] as String?) ?? 'synced',
     );
   }
 
   /// Parse from Supabase response (with nested scan_categories)
-  factory ScannedOrder.fromSupabase(Map<String, dynamic> m) {
+  factory ScanRecord.fromSupabase(Map<String, dynamic> m) {
     List<ScanCategory> cats = [];
     final scList = m['scan_categories'] as List<dynamic>?;
     if (scList != null) {
@@ -57,7 +61,7 @@ class ScannedOrder {
         }
       }
     }
-    return ScannedOrder(
+    return ScanRecord(
       id: m['id'] as int?,
       resi: (m['resi'] ?? '') as String,
       marketplace: (m['marketplace'] ?? '') as String,
@@ -67,11 +71,12 @@ class ScannedOrder {
       date: (m['date'] ?? '') as String,
       photoPath: m['photo_url'] as String?,
       categories: cats,
+      syncStatus: 'synced',
     );
   }
 
-  ScannedOrder copyWith({String? photoPath, List<ScanCategory>? categories}) {
-    return ScannedOrder(
+  ScanRecord copyWith({String? photoPath, List<ScanCategory>? categories, String? syncStatus}) {
+    return ScanRecord(
       id: id,
       resi: resi,
       marketplace: marketplace,
@@ -79,6 +84,7 @@ class ScannedOrder {
       date: date,
       photoPath: photoPath ?? this.photoPath,
       categories: categories ?? this.categories,
+      syncStatus: syncStatus ?? this.syncStatus,
     );
   }
 }

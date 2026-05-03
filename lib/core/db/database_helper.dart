@@ -1,6 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../models/category.dart';
 
 class DatabaseHelper {
@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -38,7 +38,8 @@ class DatabaseHelper {
         photo_path TEXT,
         user_id TEXT,
         team_id TEXT,
-        scanned_by TEXT
+        scanned_by TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending'
       )
     ''');
     await db.execute('CREATE UNIQUE INDEX idx_resi_user ON scans(resi, user_id)');
@@ -70,11 +71,11 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      await db.execute('ALTER TABLE orders ADD COLUMN photo_path TEXT');
+      await db.execute('ALTER TABLE scans ADD COLUMN photo_path TEXT');
     }
     if (oldVersion < 3) {
-      await db.execute('ALTER TABLE orders ADD COLUMN user_id TEXT');
-      await db.execute('CREATE INDEX idx_user_id ON orders(user_id)');
+      await db.execute('ALTER TABLE scans ADD COLUMN user_id TEXT');
+      await db.execute('CREATE INDEX idx_user_id ON scans(user_id)');
     }
     if (oldVersion < 4) {
       await db.execute('''
@@ -100,12 +101,12 @@ class DatabaseHelper {
       await db.execute('CREATE INDEX idx_oc_category ON order_categories(category_id)');
     }
     if (oldVersion < 5) {
-      // Recreate orders table with UNIQUE(resi, user_id) instead of UNIQUE(resi)
+      // Recreate scans table with UNIQUE(resi, user_id) instead of UNIQUE(resi)
       // Handle partial migration from previous crash: drop orders_old if it exists
       try { await db.execute('DROP TABLE IF EXISTS orders_old'); } catch (_) {}
-      await db.execute('ALTER TABLE orders RENAME TO orders_old');
+      await db.execute('ALTER TABLE scans RENAME TO orders_old');
       await db.execute('''
-        CREATE TABLE orders (
+        CREATE TABLE scans (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           resi TEXT NOT NULL,
           marketplace TEXT NOT NULL,
@@ -115,13 +116,13 @@ class DatabaseHelper {
           user_id TEXT
         )
       ''');
-      await db.execute('CREATE UNIQUE INDEX idx_resi_user ON orders(resi, user_id)');
-      await db.execute('CREATE INDEX idx_date ON orders(date)');
-      await db.execute('CREATE INDEX idx_marketplace ON orders(marketplace)');
-      await db.execute('CREATE INDEX idx_user_id ON orders(user_id)');
+      await db.execute('CREATE UNIQUE INDEX idx_resi_user ON scans(resi, user_id)');
+      await db.execute('CREATE INDEX idx_date ON scans(date)');
+      await db.execute('CREATE INDEX idx_marketplace ON scans(marketplace)');
+      await db.execute('CREATE INDEX idx_user_id ON scans(user_id)');
       // Copy data: keep latest row per (resi, user_id) to resolve old global UNIQUE(resi) conflicts
       await db.execute('''
-        INSERT INTO orders (resi, marketplace, scanned_at, date, photo_path, user_id)
+        INSERT INTO scans (resi, marketplace, scanned_at, date, photo_path, user_id)
         SELECT resi, marketplace, scanned_at, date, photo_path, user_id
         FROM orders_old
         WHERE id IN (
@@ -131,9 +132,9 @@ class DatabaseHelper {
       await db.execute('DROP TABLE orders_old');
     }
     if (oldVersion < 6) {
-      // Rename orders → scans, order_categories → scan_categories
+      // Rename scans → scans, order_categories → scan_categories
       // Also rename column order_id → scan_id in scan_categories
-      await db.execute('ALTER TABLE orders RENAME TO scans');
+      await db.execute('ALTER TABLE scans RENAME TO scans');
       await db.execute('ALTER TABLE order_categories RENAME TO scan_categories');
       // SQLite doesn't support ALTER COLUMN, so recreate scan_categories with scan_id
       try { await db.execute('DROP TABLE IF EXISTS scan_categories_old'); } catch (_) {}
@@ -164,9 +165,12 @@ class DatabaseHelper {
       // Add scanned_by column to track who actually scanned (differs from user_id for team members)
       await db.execute('ALTER TABLE scans ADD COLUMN scanned_by TEXT');
     }
+    if (oldVersion < 9) {
+      await db.execute("ALTER TABLE scans ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'synced'");
+    }
   }
 
-  Future<int> insertOrder(ScannedOrder order, {String? userId, String? teamId, String? scannedBy}) async {
+  Future<int> insertScan(ScanRecord order, {String? userId, String? teamId, String? scannedBy}) async {
     final db = await database;
     final map = order.toMap();
     if (userId != null) map['user_id'] = userId;
@@ -179,14 +183,14 @@ class DatabaseHelper {
     );
   }
 
-  Future<ScannedOrder?> getOrderById(int id) async {
+  Future<ScanRecord?> getScanById(int id) async {
     final db = await database;
     final maps = await db.query('scans', where: 'id = ?', whereArgs: [id], limit: 1);
     if (maps.isEmpty) return null;
-    return ScannedOrder.fromMap(maps.first);
+    return ScanRecord.fromMap(maps.first);
   }
 
-  Future<ScannedOrder?> findByResi(String resi, {String? userId}) async {
+  Future<ScanRecord?> findByResi(String resi, {String? userId}) async {
     final db = await database;
     List<Map<String, Object?>> maps;
     if (userId != null) {
@@ -205,24 +209,24 @@ class DatabaseHelper {
       );
     }
     if (maps.isEmpty) return null;
-    return ScannedOrder.fromMap(maps.first);
+    return ScanRecord.fromMap(maps.first);
   }
 
-  Future<List<ScannedOrder>> getOrdersByDate(String date, {String? userId, String? teamId}) async {
+  Future<List<ScanRecord>> getScansByDate(String date, {String? userId, String? teamId}) async {
     final db = await database;
     if (teamId != null) {
       final maps = await db.query('scans', where: 'date = ? AND team_id = ?', whereArgs: [date, teamId], orderBy: 'scanned_at DESC');
-      return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+      return maps.map((m) => ScanRecord.fromMap(m)).toList();
     }
     if (userId != null) {
       final maps = await db.query('scans', where: 'date = ? AND user_id = ?', whereArgs: [date, userId], orderBy: 'scanned_at DESC');
-      return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+      return maps.map((m) => ScanRecord.fromMap(m)).toList();
     }
     final maps = await db.query('scans', where: 'date = ? AND user_id IS NULL', whereArgs: [date], orderBy: 'scanned_at DESC');
-    return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+    return maps.map((m) => ScanRecord.fromMap(m)).toList();
   }
 
-  Future<int> updateOrderPhoto(int id, String? photoPath) async {
+  Future<int> updateScanPhoto(int id, String? photoPath) async {
     final db = await database;
     return await db.update(
       'scans',
@@ -232,18 +236,39 @@ class DatabaseHelper {
     );
   }
 
-  Future<List<ScannedOrder>> searchOrders(String query, {String? userId, String? teamId}) async {
+  Future<int> updateOrderSyncStatus(int id, String status) async {
+    final db = await database;
+    return await db.update(
+      'scans',
+      {'sync_status': status},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> updateOrderSyncStatusByResi(String resi, String status, {String? userId, String? teamId}) async {
+    final db = await database;
+    if (teamId != null) {
+      return await db.update('scans', {'sync_status': status}, where: 'resi = ? AND team_id = ?', whereArgs: [resi, teamId]);
+    }
+    if (userId != null) {
+      return await db.update('scans', {'sync_status': status}, where: 'resi = ? AND user_id = ? AND team_id IS NULL', whereArgs: [resi, userId]);
+    }
+    return await db.update('scans', {'sync_status': status}, where: 'resi = ? AND user_id IS NULL AND team_id IS NULL', whereArgs: [resi]);
+  }
+
+  Future<List<ScanRecord>> searchScans(String query, {String? userId, String? teamId}) async {
     final db = await database;
     if (teamId != null) {
       final maps = await db.query('scans', where: 'resi LIKE ? AND team_id = ?', whereArgs: ['%$query%', teamId], orderBy: 'scanned_at DESC', limit: 100);
-      return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+      return maps.map((m) => ScanRecord.fromMap(m)).toList();
     }
     if (userId != null) {
       final maps = await db.query('scans', where: 'resi LIKE ? AND user_id = ?', whereArgs: ['%$query%', userId], orderBy: 'scanned_at DESC', limit: 100);
-      return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+      return maps.map((m) => ScanRecord.fromMap(m)).toList();
     }
     final maps = await db.query('scans', where: 'resi LIKE ? AND user_id IS NULL', whereArgs: ['%$query%'], orderBy: 'scanned_at DESC', limit: 100);
-    return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+    return maps.map((m) => ScanRecord.fromMap(m)).toList();
   }
 
   Future<int> getTotalOrderCount({String? userId, String? teamId}) async {
@@ -348,7 +373,7 @@ class DatabaseHelper {
     return stats;
   }
 
-  Future<List<ScannedOrder>> getAllOrders({String? userId}) async {
+  Future<List<ScanRecord>> getAllScans({String? userId}) async {
     final db = await database;
     List<Map<String, Object?>> maps;
     if (userId != null) {
@@ -356,10 +381,10 @@ class DatabaseHelper {
     } else {
       maps = await db.query('scans', where: 'user_id IS NULL AND team_id IS NULL', orderBy: 'scanned_at DESC');
     }
-    return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+    return maps.map((m) => ScanRecord.fromMap(m)).toList();
   }
 
-  Future<int> deleteOrder(int id) async {
+  Future<int> deleteScan(int id) async {
     final db = await database;
     return await db.delete('scans', where: 'id = ?', whereArgs: [id]);
   }
@@ -435,7 +460,7 @@ class DatabaseHelper {
     ''', [id, id]);
     // Hapus order-category relations untuk kategori ini
     await db.delete('scan_categories', where: 'category_id = ?', whereArgs: [id]);
-    // Hapus orders yang hanya ada di kategori ini
+    // Hapus scans yang hanya ada di kategori ini
     for (final row in onlyInThisCategory) {
       final orderId = row['scan_id'] as int;
       await db.delete('scans', where: 'id = ?', whereArgs: [orderId]);
@@ -466,7 +491,7 @@ class DatabaseHelper {
     return result.map((m) => ScanCategory.fromMap(m)).toList();
   }
 
-  Future<List<ScannedOrder>> getOrdersByCategory(int categoryId, {String? userId, String? teamId}) async {
+  Future<List<ScanRecord>> getScansByCategory(int categoryId, {String? userId, String? teamId}) async {
     final db = await database;
     String filter = teamId != null ? 'AND o.team_id = ?' : (userId != null ? 'AND o.user_id = ?' : 'AND o.user_id IS NULL');
     List<Object?> args = teamId != null ? [categoryId, teamId] : (userId != null ? [categoryId, userId] : [categoryId]);
@@ -476,7 +501,7 @@ class DatabaseHelper {
       WHERE sc.category_id = ? $filter
       ORDER BY o.scanned_at DESC
     ''', args);
-    return result.map((m) => ScannedOrder.fromMap(m)).toList();
+    return result.map((m) => ScanRecord.fromMap(m)).toList();
   }
 
   Future<Map<String, int>> getCategoryStats({String? userId, String? teamId}) async {
@@ -562,21 +587,21 @@ class DatabaseHelper {
     ''');
   }
 
-  /// Delete orders that were synced from a team (not personal orders)
-  /// Team orders have team_id set — all belong to admin
+  /// Delete scans that were synced from a team (not personal scans)
+  /// Team scans have team_id set — all belong to admin
   Future<void> deleteTeamOrders(String userId) async {
     final db = await database;
-    // Delete scan_categories for all team orders first (foreign key)
+    // Delete scan_categories for all team scans first (foreign key)
     await db.delete('scan_categories', where: 'scan_id IN (SELECT id FROM scans WHERE team_id IS NOT NULL)');
     // Delete all team scans (they belong to admin, not personal)
     await db.delete('scans', where: 'team_id IS NOT NULL');
   }
 
-  /// Get all team orders (for photo cleanup on leave)
-  Future<List<ScannedOrder>> getTeamOrders() async {
+  /// Get all team scans (for photo cleanup on leave)
+  Future<List<ScanRecord>> getTeamScans() async {
     final db = await database;
     final maps = await db.query('scans', where: 'team_id IS NOT NULL');
-    return maps.map((m) => ScannedOrder.fromMap(m)).toList();
+    return maps.map((m) => ScanRecord.fromMap(m)).toList();
   }
 
   /// Delete categories that belong to team admin (not personal categories)
@@ -595,12 +620,28 @@ class DatabaseHelper {
     await db.delete('scans');
   }
 
-  /// Update team_id for existing orders that don't have one yet (backfill on team join)
+  /// Update team_id for existing scans that don't have one yet (backfill on team join)
   Future<void> updateTeamIdForUser(String userId, String teamId) async {
     final db = await database;
     await db.rawUpdate(
       'UPDATE scans SET team_id = ? WHERE user_id = ? AND team_id IS NULL',
       [teamId, userId],
     );
+  }
+
+  /// Delete orphan personal scans (team_id IS NULL) for a user who is now in a team
+  /// These are superseded by team scans synced from Supabase
+  Future<int> deleteOrphanPersonalScans(String userId) async {
+    final db = await database;
+    // First delete scan_categories for these orphan scans
+    final orphanIds = await db.rawQuery(
+      "SELECT id FROM scans WHERE user_id = ? AND team_id IS NULL",
+      [userId],
+    );
+    if (orphanIds.isEmpty) return 0;
+    final ids = orphanIds.map((r) => r['id']).toList();
+    await db.delete('scan_categories', where: 'scan_id IN (${ids.join(",")})');
+    final count = await db.delete('scans', where: 'user_id = ? AND team_id IS NULL', whereArgs: [userId]);
+    return count;
   }
 }

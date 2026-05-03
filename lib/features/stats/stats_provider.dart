@@ -5,7 +5,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../models/team.dart';
 import '../../services/sync_queue.dart';
 
@@ -41,6 +41,7 @@ class StatsProvider extends ChangeNotifier {
 
   // Unsynced photo resi list
   List<String> unsyncedPhotoResis = [];
+  Map<String, String> unsyncedPhotoPaths = {}; // resi -> photoPath
 
   // Team stats
   Map<String, int> memberScanStats = {}; // email -> scan count
@@ -48,6 +49,7 @@ class StatsProvider extends ChangeNotifier {
 
   String? _teamId;
   String? _adminUserId;
+  String? get teamId => _teamId;
 
   void setTeamContext(String? teamId, String? adminUserId) {
     _teamId = teamId;
@@ -76,6 +78,7 @@ class StatsProvider extends ChangeNotifier {
     await _loadSyncStats(userId: userId, teamId: teamId);
     await _loadCategorySyncStats(userId: userId, teamId: teamId);
     await _loadTeamStats();
+    debugPrint('[Stats] photoSizeBytes=$photoSizeBytes, cloudPhotoSizeBytes=$cloudPhotoSizeBytes, dbSizeBytes=$dbSizeBytes, cloudDbSizeBytes=$cloudDbSizeBytes');
     notifyListeners();
   }
 
@@ -124,10 +127,10 @@ class StatsProvider extends ChangeNotifier {
           }
         } else {
           // Personal mode: only count photos for personal scans
-          // Build set of local file paths from orders (both local paths and cloud URLs that have local files)
+          // Build set of local file paths from scans (both local paths and cloud URLs that have local files)
           final personalOrders = userId != null
-              ? await _db.getAllOrders(userId: userId)
-              : <ScannedOrder>[];
+              ? await _db.getAllScans(userId: userId)
+              : <ScanRecord>[];
           final localPhotoPaths = <String>{};
           for (final o in personalOrders) {
             if (o.photoPath != null && o.photoPath!.isNotEmpty) {
@@ -176,11 +179,11 @@ class StatsProvider extends ChangeNotifier {
       final response = teamId != null
           ? await client
               .from('scans')
-              .select('id, photo_url, resi')
+              .select('id, photo_url, resi, user_id')
               .eq('team_id', teamId)
           : await client
               .from('scans')
-              .select('id, photo_url, resi')
+              .select('id, photo_url, resi, user_id')
               .eq('user_id', userId);
       syncedScans = response.length;
       unsyncedScans = total - syncedScans;
@@ -195,6 +198,7 @@ class StatsProvider extends ChangeNotifier {
         if (photoUrl != null && photoUrl.isNotEmpty) {
           if (photoUrl.startsWith('http')) {
             cloudPhotos++;
+            cloudPhotoResis.add(row['resi'] as String? ?? '');
           } else {
             // photo_url di cloud masih path lokal = belum upload fotonya
             localOnlyPhotos++;
@@ -202,68 +206,111 @@ class StatsProvider extends ChangeNotifier {
         }
       }
 
-      // Hitung ukuran foto yang sudah di cloud dari file lokal
-      final orders = await _db.getAllOrders(userId: userId);
-      for (final o in orders) {
-        if (o.photoPath != null && o.photoPath!.isNotEmpty) {
-          // Foto lokal yang belum ada di cloud (order belum sync ke cloud)
-          if (!o.photoPath!.startsWith('http') && !cloudPhotoResis.contains(o.resi)) {
-            // Sudah dihitung di localOnlyPhotos atau order belum ada di cloud
+      // For team mode: count unsynced photos also from Supabase (not local DB)
+      // because local DB filters team_id IS NULL and won't include team scans
+      if (teamId != null) {
+        // Team scans with photo_url that is NOT http = photo not uploaded
+        // Orders not in Supabase at all but have photos locally
+        final localTeamOrders = await _db.getTeamScans();
+        final cloudResiSet = (response as List).map((r) => r['resi'] as String?).where((r) => r != null).toSet();
+        int extraUnsyncedPhotos = 0;
+        for (final o in localTeamOrders) {
+          if (!cloudResiSet.contains(o.resi) && o.photoPath != null && o.photoPath!.isNotEmpty) {
+            extraUnsyncedPhotos++;
           }
-          // Hitung ukuran foto yang sudah sync ke cloud
-          if (o.photoPath!.startsWith('http')) {
-            // Foto di cloud — cek apakah file lokal masih ada untuk ukuran
-          } else {
-            final f = File(o.photoPath!);
-            if (f.existsSync()) {
-              // Jika foto ini ada di cloud (cloudPhotos count), tambah ukurannya
-              // Kita estimasi: proporsi foto lokal yang sync = cloudPhotos / totalPhotos
+        }
+
+        // Estimasi ukuran foto cloud
+        if (photoCount > 0 && cloudPhotos > 0) {
+          final avgPhotoSize = photoSizeBytes ~/ photoCount;
+          cloudPhotoBytes = avgPhotoSize * cloudPhotos;
+        }
+        cloudPhotoSizeBytes = cloudPhotoBytes;
+
+        // Estimasi ukuran DB cloud
+        if (dbSizeBytes > 0 && total > 0 && syncedScans > 0) {
+          cloudDbSizeBytes = (dbSizeBytes * syncedScans) ~/ total;
+        } else {
+          cloudDbSizeBytes = 0;
+        }
+
+        syncedPhotos = cloudPhotos;
+        unsyncedPhotos = localOnlyPhotos + extraUnsyncedPhotos;
+
+        // Collect unsynced photo resi list
+        final unsyncedResis = <String>[];
+        final unsyncedPaths = <String, String>{};
+        // Orders in cloud but photo not uploaded (photo_url is local path)
+        for (final row in response) {
+          final photoUrl = row['photo_url'] as String?;
+          final resi = row['resi'] as String?;
+          if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http') && resi != null) {
+            unsyncedResis.add(resi);
+            unsyncedPaths[resi] = photoUrl;
+            debugPrint('[Stats] unsynced photo: resi=$resi, photo_url=$photoUrl');
+          }
+        }
+        // Local team scans not synced to cloud at all
+        for (final o in localTeamOrders) {
+          if (!cloudResiSet.contains(o.resi) && o.photoPath != null && o.photoPath!.isNotEmpty) {
+            unsyncedResis.add(o.resi);
+            unsyncedPaths[o.resi] = o.photoPath!;
+            debugPrint('[Stats] unsynced photo (local only): resi=${o.resi}, photoPath=${o.photoPath}');
+          }
+        }
+        unsyncedPhotoResis = unsyncedResis;
+        unsyncedPhotoPaths = unsyncedPaths;
+      } else {
+        // Personal mode: use local DB for photo stats
+        final scans = await _db.getAllScans(userId: userId);
+
+        // Estimasi ukuran foto cloud
+        if (photoCount > 0 && cloudPhotos > 0) {
+          final avgPhotoSize = photoSizeBytes ~/ photoCount;
+          cloudPhotoBytes = avgPhotoSize * cloudPhotos;
+        }
+        cloudPhotoSizeBytes = cloudPhotoBytes;
+
+        // Estimasi ukuran DB cloud
+        if (dbSizeBytes > 0 && total > 0 && syncedScans > 0) {
+          cloudDbSizeBytes = (dbSizeBytes * syncedScans) ~/ total;
+        } else {
+          cloudDbSizeBytes = 0;
+        }
+
+        syncedPhotos = cloudPhotos;
+        unsyncedPhotos = localOnlyPhotos + unsyncedScans;
+
+        // Collect unsynced photo resi list
+        final unsyncedResis = <String>[];
+        final unsyncedPaths = <String, String>{};
+        // Orders not synced to cloud at all
+        if (unsyncedScans > 0) {
+          final cloudResis = (response as List).map((r) => r['resi'] as String?).where((r) => r != null).toSet();
+          for (final o in scans) {
+            if (!cloudResis.contains(o.resi) && o.photoPath != null && o.photoPath!.isNotEmpty) {
+              unsyncedResis.add(o.resi);
+              unsyncedPaths[o.resi] = o.photoPath!;
             }
           }
         }
-      }
-
-      // Estimasi ukuran foto cloud: rata-rata ukuran foto lokal × jumlah foto cloud
-      if (photoCount > 0 && cloudPhotos > 0) {
-        final avgPhotoSize = photoSizeBytes ~/ photoCount;
-        cloudPhotoBytes = avgPhotoSize * cloudPhotos;
-      }
-      cloudPhotoSizeBytes = cloudPhotoBytes;
-
-      // Estimasi ukuran DB cloud: proporsi data sync × ukuran DB lokal (user's portion)
-      if (dbSizeBytes > 0 && total > 0 && syncedScans > 0) {
-        cloudDbSizeBytes = (dbSizeBytes * syncedScans) ~/ total;
-      } else {
-        cloudDbSizeBytes = 0;
-      }
-
-      syncedPhotos = cloudPhotos;
-      unsyncedPhotos = localOnlyPhotos + unsyncedScans; // foto di cloud masih path + foto yang order belum sync
-
-      // Collect unsynced photo resi list
-      final unsyncedResis = <String>[];
-      // Orders not synced to cloud at all
-      if (unsyncedScans > 0) {
-        final localOrders = await _db.getAllOrders(userId: userId);
-        final cloudResis = (response as List).map((r) => r['resi'] as String?).where((r) => r != null).toSet();
-        for (final o in localOrders) {
-          if (!cloudResis.contains(o.resi) && o.photoPath != null && o.photoPath!.isNotEmpty) {
-            unsyncedResis.add(o.resi);
+        // Orders in cloud but photo not uploaded (photo_url is local path)
+        for (final row in response) {
+          final photoUrl = row['photo_url'] as String?;
+          final resi = row['resi'] as String?;
+          if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http') && resi != null) {
+            unsyncedResis.add(resi);
+            unsyncedPaths[resi] = photoUrl;
           }
         }
+        unsyncedPhotoResis = unsyncedResis;
+        unsyncedPhotoPaths = unsyncedPaths;
       }
-      // Orders in cloud but photo not uploaded (photo_url is local path)
-      for (final row in response) {
-        final photoUrl = row['photo_url'] as String?;
-        final resi = row['resi'] as String?;
-        if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http') && resi != null) {
-          unsyncedResis.add(resi);
-        }
-      }
-      unsyncedPhotoResis = unsyncedResis;
 
       // Pending queue count
       pendingQueueCount = await _syncQueue.pendingCount;
+
+      debugPrint('[Stats] sync stats: total=$total, syncedScans=$syncedScans, unsyncedScans=$unsyncedScans, cloudPhotos=$cloudPhotos, localOnlyPhotos=$localOnlyPhotos, syncedPhotos=$syncedPhotos, unsyncedPhotos=$unsyncedPhotos, pendingQueue=$pendingQueueCount, teamId=$teamId');
     } catch (e) {
       debugPrint('Sync stats error: $e');
     }

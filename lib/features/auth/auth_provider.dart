@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../models/team.dart';
 import '../../services/quota_service.dart';
 
@@ -125,7 +125,7 @@ class AuthProvider extends ChangeNotifier {
       final ok = await _supabase.joinTeam(inviteCode);
       if (ok) {
         await _loadTeam();
-        // Sync team data (orders + admin categories) to local
+        // Sync team data (scans + admin categories) to local
         await syncOnLogin();
       } else {
         _error = 'Kode invite tidak valid';
@@ -187,13 +187,13 @@ class AuthProvider extends ChangeNotifier {
       if (userId == null) return;
 
       // Get photo paths of team scans before deleting them
-      final teamOrders = await _db.getTeamOrders();
+      final teamOrders = await _db.getTeamScans();
       final teamPhotoPaths = teamOrders
           .where((o) => o.photoPath != null && !o.photoPath!.startsWith('http'))
           .map((o) => o.photoPath!)
           .toList();
 
-      // Delete orders that belong to a team (not user's personal orders)
+      // Delete scans that belong to a team (not user's personal scans)
       await _db.deleteTeamOrders(userId);
       // Delete categories that belong to team admin (not user's personal categories)
       await _db.deleteTeamCategories(userId);
@@ -315,28 +315,41 @@ class AuthProvider extends ChangeNotifier {
       final userId = _supabase.currentUser?.id;
       final teamId = _currentTeam?.id;
       final remote = teamId != null
-          ? await _supabase.fetchTeamOrders(teamId)
+          ? await _supabase.fetchTeamScans(teamId)
           : await _supabase.fetchOrders();
       debugPrint('[AuthProvider] syncOnLogin: userId=$userId, teamId=$teamId, remoteOrders=${remote.length}');
       int synced = 0;
       for (final m in remote) {
         try {
-          final o = ScannedOrder.fromSupabase(m);
-          final id = await _db.insertOrder(o, userId: userId, teamId: teamId);
+          final o = ScanRecord.fromSupabase(m);
+          final id = await _db.insertScan(o, userId: userId, teamId: teamId);
           if (id > 0) {
             synced++;
           } else {
-            debugPrint('[AuthProvider] syncOnLogin: insertOrder ignored (duplicate?) resi=${o.resi}');
+            debugPrint('[AuthProvider] syncOnLogin: insertScan ignored (duplicate?) resi=${o.resi}');
           }
         } catch (e) {
           debugPrint('Sync row error: $e');
         }
       }
-      debugPrint('[AuthProvider] syncOnLogin: synced=$synced orders');
+      debugPrint('[AuthProvider] syncOnLogin: synced=$synced scans');
 
-      // If in a team, update team_id for existing orders that don't have it yet
+      // If in a team, update team_id for existing scans that don't have it yet
       if (teamId != null && userId != null) {
         await _db.updateTeamIdForUser(userId, teamId);
+        // After syncing team data from Supabase, delete orphan personal scans
+        // (they're superseded by team scans already in local DB from sync above)
+        final deleted = await _db.deleteOrphanPersonalScans(userId);
+        if (deleted > 0) {
+          debugPrint('[AuthProvider] syncOnLogin: deleted $deleted orphan personal scans for team user');
+        }
+        // Admin: reassign scans from dissolved teams to current active team
+        if (isAdmin) {
+          final reassigned = await _supabase.reassignOrphanTeamScans(userId, teamId);
+          if (reassigned > 0) {
+            debugPrint('[AuthProvider] syncOnLogin: reassigned $reassigned orphan scans to team $teamId');
+          }
+        }
       }
 
       // Sync photos from cloud to local
@@ -420,11 +433,11 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _syncPhotosToLocal({String? userId}) async {
     try {
-      final orders = await _db.getAllOrders(userId: userId);
+      final scans = await _db.getAllScans(userId: userId);
       final dir = await getApplicationDocumentsDirectory();
       int downloaded = 0;
 
-      for (final o in orders) {
+      for (final o in scans) {
         final photoPath = o.photoPath;
         if (photoPath == null || photoPath.isEmpty) continue;
 
@@ -445,7 +458,7 @@ class AuthProvider extends ChangeNotifier {
               final localPath = await _supabase.downloadPhoto(storagePath, localFile.path);
               if (localPath != null) {
                 // Update photo_path di DB lokal ke path lokal
-                await _db.updateOrderPhoto(o.id!, localPath);
+                await _db.updateScanPhoto(o.id!, localPath);
                 downloaded++;
               }
             }
@@ -471,7 +484,7 @@ class AuthProvider extends ChangeNotifier {
                 final localFile = File('${dir.path}/scan_${o.scannedAt.millisecondsSinceEpoch}.jpg');
                 final localPath = await _supabase.downloadPhoto(storagePath, localFile.path);
                 if (localPath != null) {
-                  await _db.updateOrderPhoto(o.id!, localPath);
+                  await _db.updateScanPhoto(o.id!, localPath);
                   downloaded++;
                 }
               }

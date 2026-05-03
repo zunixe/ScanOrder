@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../models/order.dart';
+import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../models/team.dart';
 import '../db/database_helper.dart';
@@ -10,7 +10,7 @@ import '../db/database_helper.dart';
 ///
 /// Setup:
 /// 1. Buat project di https://supabase.com (gratis tier)
-/// 2. Buat table `orders` dengan kolom: id, device_id, resi, marketplace, scanned_at, date, photo_url
+/// 2. Buat table `scans` dengan kolom: id, device_id, resi, marketplace, scanned_at, date, photo_url
 /// 3. Copy Supabase URL dan anon key ke [supabaseUrl] dan [supabaseKey]
 /// 4. Buka Storage di Supabase, buat bucket `scan-photos` (public)
 class SupabaseService {
@@ -84,6 +84,7 @@ class SupabaseService {
       await client.storage.from('scan-photos').upload(fileName, file);
       return client.storage.from('scan-photos').getPublicUrl(fileName);
     } catch (e) {
+      debugPrint('[Supabase] uploadPhoto error: $e');
       return null;
     }
   }
@@ -103,7 +104,7 @@ class SupabaseService {
   }
 
   /// Kirim order yang baru di-scan ke Supabase
-  Future<void> insertOrder(ScannedOrder order, {String? deviceId}) async {
+  Future<void> insertScan(ScanRecord order, {String? deviceId}) async {
     final client = _client;
     if (client == null) {
       debugPrint('[Supabase] Client not initialized');
@@ -129,7 +130,7 @@ class SupabaseService {
   }
 
   /// Hapus order dari Supabase berdasarkan resi + device_id
-  Future<void> deleteOrderByResi(String resi, {String? deviceId}) async {
+  Future<void> deleteScanByResi(String resi, {String? deviceId}) async {
     final client = _client;
     if (client == null) return;
     try {
@@ -146,7 +147,7 @@ class SupabaseService {
     }
   }
 
-  /// Ambil semua orders dari user yang login (berdasarkan user_id)
+  /// Ambil semua scans dari user yang login (berdasarkan user_id)
   Future<List<Map<String, dynamic>>> fetchOrders() async {
     final client = _client;
     if (client == null) return [];
@@ -160,7 +161,7 @@ class SupabaseService {
           .order('scanned_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] fetch orders error: $e');
+      debugPrint('[Supabase] fetch scans error: $e');
       return [];
     }
   }
@@ -370,7 +371,13 @@ class SupabaseService {
     final client = _client;
     if (client == null) return false;
     try {
-      // Delete all team members first
+      // Set team_id to NULL on all scans (they become personal scans again)
+      await client
+          .from('scans')
+          .update({'team_id': null})
+          .eq('team_id', teamId);
+      
+      // Delete all team members
       await client
           .from('team_members')
           .delete()
@@ -380,10 +387,55 @@ class SupabaseService {
           .from('teams')
           .delete()
           .eq('id', teamId);
+      
       return true;
     } catch (e) {
       debugPrint('[Supabase] Dissolve team error: $e');
       return false;
+    }
+  }
+
+  /// Reassign orphan scans (team_id points to dissolved team) to the current active team
+  /// Called by admin when they have scans from a dissolved team
+  Future<int> reassignOrphanTeamScans(String adminUserId, String activeTeamId) async {
+    final client = _client;
+    if (client == null) return 0;
+    try {
+      // Find scans owned by admin that have a team_id pointing to a non-existent team
+      final adminScans = await client
+          .from('scans')
+          .select('id, team_id')
+          .eq('user_id', adminUserId)
+          .not('team_id', 'is', null);
+      
+      final orphanIds = <int>[];
+      for (final s in adminScans) {
+        final scanTeamId = s['team_id'] as String?;
+        if (scanTeamId != null && scanTeamId != activeTeamId) {
+          // Check if this team still exists
+          final teamCheck = await client
+              .from('teams')
+              .select('id')
+              .eq('id', scanTeamId)
+              .maybeSingle();
+          if (teamCheck == null) {
+            // Team no longer exists — this scan is orphaned
+            orphanIds.add(s['id'] as int);
+          }
+        }
+      }
+      
+      if (orphanIds.isEmpty) return 0;
+      
+      // Reassign all orphan scans to the active team
+      for (final id in orphanIds) {
+        await client.from('scans').update({'team_id': activeTeamId}).eq('id', id);
+      }
+      debugPrint('[Supabase] Reassigned ${orphanIds.length} orphan scans to team $activeTeamId');
+      return orphanIds.length;
+    } catch (e) {
+      debugPrint('[Supabase] Reassign orphan scans error: $e');
+      return 0;
     }
   }
 
@@ -430,7 +482,7 @@ class SupabaseService {
   }
 
   /// Update order methods to use team_id
-  Future<void> insertOrderWithTeam(ScannedOrder order, {String? deviceId, String? teamId}) async {
+  Future<void> insertScanWithTeam(ScanRecord order, {String? deviceId, String? teamId}) async {
     final client = _client;
     if (client == null) {
       debugPrint('[Supabase] Client not initialized');
@@ -457,7 +509,7 @@ class SupabaseService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchTeamOrders(String teamId) async {
+  Future<List<Map<String, dynamic>>> fetchTeamScans(String teamId) async {
     final client = _client;
     if (client == null) return [];
     try {
@@ -497,10 +549,10 @@ class SupabaseService {
     }
   }
 
-  /// Get team orders by date from Supabase
-  Future<List<Map<String, dynamic>>> getTeamOrdersByDate(String teamId, String date) async {
+  /// Get team scans by date from Supabase
+  Future<List<Map<String, dynamic>>> getTeamScansByDate(String teamId, String date) async {
     final client = _client;
-    if (client == null) { debugPrint('[Supabase] getTeamOrdersByDate: no client'); return []; }
+    if (client == null) { debugPrint('[Supabase] getTeamScansByDate: no client'); return []; }
     try {
       final response = await client
           .from('scans')
@@ -508,17 +560,17 @@ class SupabaseService {
           .eq('team_id', teamId)
           .eq('date', date)
           .order('scanned_at', ascending: false);
-      debugPrint('[Supabase] getTeamOrdersByDate: teamId=$teamId, date=$date, rows=${(response as List).length}');
-      if ((response as List).isNotEmpty) debugPrint('[Supabase] getTeamOrdersByDate sample: ${response.first}');
+      debugPrint('[Supabase] getTeamScansByDate: teamId=$teamId, date=$date, rows=${(response as List).length}');
+      if ((response as List).isNotEmpty) debugPrint('[Supabase] getTeamScansByDate sample: ${response.first}');
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] getTeamOrdersByDate error: $e');
+      debugPrint('[Supabase] getTeamScansByDate error: $e');
       return [];
     }
   }
 
-  /// Search team orders by resi from Supabase
-  Future<List<Map<String, dynamic>>> searchTeamOrders(String teamId, String query) async {
+  /// Search team scans by resi from Supabase
+  Future<List<Map<String, dynamic>>> searchTeamScans(String teamId, String query) async {
     final client = _client;
     if (client == null) return [];
     try {
@@ -531,7 +583,7 @@ class SupabaseService {
           .limit(100);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] searchTeamOrders error: $e');
+      debugPrint('[Supabase] searchTeamScans error: $e');
       return [];
     }
   }
@@ -624,14 +676,14 @@ class SupabaseService {
   }
 
   /// Get category stats for a team from Supabase (scan_categories join)
+  /// Counts scan_categories entries per category (a scan in multiple categories counts in each)
   Future<Map<String, int>> getTeamCategoryStats(String teamId) async {
     final client = _client;
     if (client == null) return {};
     try {
-      // Fetch scan_categories joined with scans filtered by team_id
       final response = await client
           .from('scan_categories')
-          .select('category_id, scans!inner(team_id), categories!inner(name)')
+          .select('categories!inner(name), scans!inner(team_id)')
           .eq('scans.team_id', teamId);
       final stats = <String, int>{};
       for (final row in response as List) {
@@ -679,16 +731,45 @@ class SupabaseService {
         if (catRows.isEmpty) { skipped++; continue; }
         final catUuid = catRows.first['id'];
 
-        // Upsert scan_categories
+        // Upsert scan_categories with onConflict to prevent duplicates
         await client.from('scan_categories').upsert({
           'scan_id': scanId,
           'category_id': catUuid,
-        });
+        }, onConflict: 'scan_id,category_id');
         synced++;
       }
       debugPrint('[Supabase] repairScanCategories: synced=$synced, skipped=$skipped, total=${localRows.length}');
+      // Cleanup duplicate scan_categories rows
+      await _dedupScanCategories();
     } catch (e) {
       debugPrint('[Supabase] repairScanCategories error: $e');
+    }
+  }
+
+  /// Remove duplicate scan_categories rows (same scan_id + category_id but different row id)
+  Future<void> _dedupScanCategories() async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      // Fetch all scan_categories
+      final rows = await client.from('scan_categories').select('id, scan_id, category_id');
+      final seen = <String, int>{}; // 'scan_id:category_id' -> first row id
+      final duplicateIds = <int>[];
+      for (final row in rows as List) {
+        final key = '${row['scan_id']}:${row['category_id']}';
+        final rowId = row['id'] as int;
+        if (seen.containsKey(key)) {
+          duplicateIds.add(rowId);
+        } else {
+          seen[key] = rowId;
+        }
+      }
+      if (duplicateIds.isNotEmpty) {
+        await client.from('scan_categories').delete().inFilter('id', duplicateIds);
+        debugPrint('[Supabase] _dedupScanCategories: removed ${duplicateIds.length} duplicate rows');
+      }
+    } catch (e) {
+      debugPrint('[Supabase] _dedupScanCategories error: $e');
     }
   }
 
@@ -871,7 +952,7 @@ class SupabaseService {
     if (client == null) return;
     try {
       // Find the Supabase scan_id by looking up the local order's resi
-      final order = await DatabaseHelper.instance.getOrderById(localOrderId);
+      final order = await DatabaseHelper.instance.getScanById(localOrderId);
       if (order == null) {
         debugPrint('[Supabase] assignOrderCategory: local order $localOrderId not found');
         return;
@@ -887,7 +968,7 @@ class SupabaseService {
       await client.from('scan_categories').upsert({
         'scan_id': supabaseScanId,
         'category_id': categoryId,
-      });
+      }, onConflict: 'scan_id,category_id');
       debugPrint('[Supabase] assignOrderCategory OK: resi=$resi, supabaseScanId=$supabaseScanId, categoryId=$categoryId');
     } catch (e) {
       debugPrint('[Supabase] assign order category error: $e');
