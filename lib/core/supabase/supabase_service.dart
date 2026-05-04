@@ -19,9 +19,9 @@ class SupabaseService {
   factory SupabaseService() => _instance;
   SupabaseService._internal();
 
-  // GANTI INI dengan URL dan key dari Supabase project Anda:
-  static const String _supabaseUrl = 'https://rnithriviguzbfpvzrwq.supabase.co';
-  static const String _supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJuaXRocml2aWd1emJmcHZ6cndxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NjQwNDksImV4cCI6MjA5MzA0MDA0OX0.3dMU23uT_9uEGHirs0PieViE7k1M_ezlCJ8wjryf2lc';
+  // Credentials dari compile-time env (--dart-define)
+  static const String _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  static const String _supabaseKey = String.fromEnvironment('SUPABASE_ANON_KEY');
 
   bool _isOffline = false;
   bool get isOffline => _isOffline;
@@ -30,7 +30,7 @@ class SupabaseService {
   String get key => _supabaseKey;
 
   bool get _isConfigured =>
-      !_supabaseUrl.contains('YOUR_PROJECT') && !_supabaseKey.contains('YOUR_ANON_KEY');
+      _supabaseUrl.isNotEmpty && _supabaseKey.isNotEmpty;
 
   Future<void> initialize() async {
     if (!_isConfigured) {

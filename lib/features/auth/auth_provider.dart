@@ -8,6 +8,7 @@ import '../../core/supabase/supabase_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/team.dart';
 import '../../services/quota_service.dart';
+import '../settings/settings_provider.dart';
 
 class AuthProvider extends ChangeNotifier {
   final _supabase = SupabaseService();
@@ -15,6 +16,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoggedIn = false;
   bool _isLoading = false;
   String? _error;
+  String? _currentLocale;
 
   // Team state
   Team? _currentTeam;
@@ -33,6 +35,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isAdmin => _currentTeam?.createdBy == _supabase.currentUser?.id;
   bool get isTeamMember => hasTeam && !isAdmin;
   String? get teamId => _currentTeam?.id;
+  String? get currentLocale => _currentLocale;
 
   AuthProvider() {
     _checkAuth();
@@ -429,6 +432,21 @@ class AuthProvider extends ChangeNotifier {
 
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  Future<void> setLocale(String? locale) async {
+    _currentLocale = locale;
+    // Save to SharedPreferences via SettingsProvider
+    final settings = SettingsProvider();
+    await settings.setLocale(locale);
+    notifyListeners();
+  }
+
+  Future<void> loadLocale() async {
+    final settings = SettingsProvider();
+    await settings.loadSettings();
+    _currentLocale = settings.locale;
     notifyListeners();
   }
 

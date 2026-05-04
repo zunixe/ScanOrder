@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ScanOrder (Debug)",
+      "request": "launch",
+      "type": "dart",
+      "toolArgs": [
+        "--dart-define-from-file=${workspaceFolder}/.env"
+      ]
+    },
+    {
+      "name": "ScanOrder (Profile)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "profile",
+      "toolArgs": [
+        "--dart-define-from-file=${workspaceFolder}/.env"
+      ]
+    },
+    {
+      "name": "ScanOrder (Release)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "release",
+      "toolArgs": [
+        "--dart-define-from-file=${workspaceFolder}/.env"
+      ]
+    }
+  ]
+}
