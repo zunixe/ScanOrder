@@ -14,6 +14,8 @@ import 'features/subscription/subscription_provider.dart';
 import 'features/settings/settings_page.dart';
 import 'features/settings/settings_provider.dart';
 import 'features/auth/auth_provider.dart';
+import 'features/splash/splash_screen.dart';
+import 'features/splash/onboarding_screen.dart';
 
 class ScanOrderApp extends StatelessWidget {
   const ScanOrderApp({super.key});
@@ -57,11 +59,52 @@ class ScanOrderApp extends StatelessWidget {
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: _getThemeMode(settings.darkMode),
-            home: const MainShell(),
+            home: const _AppEntry(),
           );
         },
       ),
     );
+  }
+}
+
+/// Decides entry: SplashScreen → OnboardingScreen (first time) or MainShell
+class _AppEntry extends StatefulWidget {
+  const _AppEntry();
+
+  @override
+  State<_AppEntry> createState() => _AppEntryState();
+}
+
+class _AppEntryState extends State<_AppEntry> {
+  bool? _showOnboarding;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkOnboarding();
+  }
+
+  Future<void> _checkOnboarding() async {
+    final show = await shouldShowOnboarding();
+    if (mounted) setState(() => _showOnboarding = show);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_showOnboarding == null) {
+      // Still loading — show splash
+      return SplashScreen(
+        next: const SizedBox.shrink(),
+      );
+    }
+    if (_showOnboarding!) {
+      // First time — splash → onboarding → main
+      return SplashScreen(
+        next: OnboardingScreen(next: const MainShell()),
+      );
+    }
+    // Returning user — splash → main
+    return SplashScreen(next: const MainShell());
   }
 }
 
@@ -72,7 +115,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   final _pages = [
@@ -86,12 +129,31 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       auth.addListener(_onAuthChange);
       _syncUserId(auth);
       context.read<SettingsProvider>().loadSettings();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    try { context.read<AuthProvider>().removeListener(_onAuthChange); } catch (_) {}
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Check session validity when app comes to foreground
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<AuthProvider>().checkSessionOnResume();
+      });
+    }
   }
 
   void _onAuthChange() {

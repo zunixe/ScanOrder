@@ -153,7 +153,7 @@ class ScanProvider extends ChangeNotifier {
               .select('id')
               .eq('user_id', userId)
               .eq('name', name)
-              .maybeSingle() as Map<String, dynamic>?;
+              .maybeSingle();
           final uuid = existing?['id'];
           if (uuid != null) {
             // Update existing

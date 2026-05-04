@@ -113,7 +113,7 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
                       const SizedBox(height: 16),
                       const Text(
                         'Pilih Paket',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.cardTitleSize),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: AppTheme.cardTitleSize),
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 8),

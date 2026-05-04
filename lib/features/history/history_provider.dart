@@ -241,6 +241,15 @@ class HistoryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Update in-memory photoPath to local cached path (no DB/Supabase write)
+  void updatePhotoLocal(int id, String localPath) {
+    final idx = scans.indexWhere((o) => o.id == id);
+    if (idx >= 0) {
+      scans[idx] = scans[idx].copyWith(photoPath: localPath);
+    }
+    notifyListeners();
+  }
+
   Future<List<ScanRecord>> getAllForExport() async {
     if (_teamId != null) {
       // Team mode: fetch all from Supabase
