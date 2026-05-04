@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/theme.dart';
 import 'core/supabase/supabase_service.dart';
+import 'core/l10n/app_localizations.dart';
 import 'features/scan/scan_page.dart';
 import 'features/scan/scan_provider.dart';
 import 'features/history/history_page.dart';
@@ -36,15 +37,29 @@ class ScanOrderApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
       ],
-      child: Consumer<SettingsProvider>(
-        builder: (_, settings, _) => MaterialApp(
-          title: 'ScanOrder',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
-          themeMode: _getThemeMode(settings.darkMode),
-          home: const MainShell(),
-        ),
+      child: Consumer2<SettingsProvider, AuthProvider>(
+        builder: (_, settings, auth, __) {
+          final locale = auth.currentLocale != null 
+              ? Locale(auth.currentLocale!) 
+              : const Locale('id');
+          
+          return MaterialApp(
+            title: 'ScanOrder',
+            debugShowCheckedModeBanner: false,
+            locale: locale,
+            supportedLocales: kSupportedLocales,
+            localizationsDelegates: [
+              AppLocalizationsDelegate(locale),
+              ...GlobalMaterialLocalizations.delegates,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: _getThemeMode(settings.darkMode),
+            home: const MainShell(),
+          );
+        },
       ),
     );
   }

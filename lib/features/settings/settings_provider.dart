@@ -7,18 +7,21 @@ class SettingsProvider extends ChangeNotifier {
   static const String _wakelockKey = 'settings_wakelock';
   static const String _darkModeKey = 'settings_dark_mode'; // 'system', 'light', 'dark'
   static const String _compressPhotoKey = 'settings_compress_photo';
+  static const String _localeKey = 'settings_locale'; // 'id', 'en'
 
   bool _soundEnabled = true;
   bool _vibrationEnabled = true;
   bool _wakelockEnabled = true;
   String _darkMode = 'system';
   bool _compressPhoto = true;
+  String? _locale;
 
   bool get soundEnabled => _soundEnabled;
   bool get vibrationEnabled => _vibrationEnabled;
   bool get wakelockEnabled => _wakelockEnabled;
   String get darkMode => _darkMode;
   bool get compressPhoto => _compressPhoto;
+  String? get locale => _locale;
 
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -27,6 +30,7 @@ class SettingsProvider extends ChangeNotifier {
     _wakelockEnabled = prefs.getBool(_wakelockKey) ?? true;
     _darkMode = prefs.getString(_darkModeKey) ?? 'system';
     _compressPhoto = prefs.getBool(_compressPhotoKey) ?? true;
+    _locale = prefs.getString(_localeKey);
     notifyListeners();
   }
 
@@ -62,6 +66,17 @@ class SettingsProvider extends ChangeNotifier {
     _compressPhoto = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_compressPhotoKey, value);
+    notifyListeners();
+  }
+
+  Future<void> setLocale(String? value) async {
+    _locale = value;
+    final prefs = await SharedPreferences.getInstance();
+    if (value != null) {
+      await prefs.setString(_localeKey, value);
+    } else {
+      await prefs.remove(_localeKey);
+    }
     notifyListeners();
   }
 }
