@@ -154,7 +154,7 @@ class _StatsPageState extends State<StatsPage> {
                 ],
 
                 // Team member scan stats (Team users only)
-                if ((sub.currentTier == StorageTier.unlimited || auth!.isTeamMember) && provider.memberScanStats.isNotEmpty) ...[
+                if ((sub.currentTier == StorageTier.unlimited || auth.isTeamMember) && provider.memberScanStats.isNotEmpty) ...[
                   const SizedBox(height: 24),
                   const Text(
                     'Scan per Anggota Tim',
@@ -521,7 +521,7 @@ class _StatsPageState extends State<StatsPage> {
                           ),
                         ),
                         const Divider(height: 16),
-                        if (sub.currentTier == StorageTier.unlimited || auth!.isTeamMember) ...[
+                        if (sub.currentTier == StorageTier.unlimited || auth.isTeamMember) ...[
                           _SyncRow(
                             label: 'Kategori Tersinkron ke Cloud',
                             value: '${provider.syncedCategories}',
@@ -758,7 +758,7 @@ class _StatsPageState extends State<StatsPage> {
                               tooltip: 'Lihat Foto',
                               onPressed: () {
                                 Navigator.pop(ctx);
-                                _showPhotoViewer(context, photoPath!);
+                                _showPhotoViewer(context, photoPath);
                               },
                             ),
                           IconButton(
@@ -843,7 +843,7 @@ class _StatsPageState extends State<StatsPage> {
             const SizedBox(height: 12),
             const Text(
               'Statistik Lengkap',
-              style: const TextStyle(fontSize: AppTheme.sectionTitleSize, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: AppTheme.sectionTitleSize, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             Text(

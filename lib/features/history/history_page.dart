@@ -560,10 +560,104 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 }
 
-class _OrderTile extends StatelessWidget {
+class _OrderTile extends StatefulWidget {
   final ScanRecord order;
   final bool isLatest;
   const _OrderTile({required this.order, this.isLatest = false});
+
+  @override
+  State<_OrderTile> createState() => _OrderTileState();
+}
+
+class _OrderTileState extends State<_OrderTile> {
+  String? _resolvedPhotoPath;
+  bool _resolvingPhoto = false;
+
+  ScanRecord get order => widget.order;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolvePhotoPath();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OrderTile old) {
+    super.didUpdateWidget(old);
+    if (old.order.photoPath != widget.order.photoPath) {
+      _resolvePhotoPath();
+    }
+  }
+
+  Future<void> _resolvePhotoPath() async {
+    final photoPath = order.photoPath;
+    if (photoPath == null) {
+      if (mounted) setState(() { _resolvedPhotoPath = null; _resolvingPhoto = false; });
+      return;
+    }
+
+    // If it's a local path and file exists → use it directly
+    if (!photoPath.startsWith('http') && File(photoPath).existsSync()) {
+      if (mounted) setState(() { _resolvedPhotoPath = photoPath; _resolvingPhoto = false; });
+      return;
+    }
+
+    // If it's a cloud URL → check if we already cached it locally
+    if (photoPath.startsWith('http')) {
+      final cached = await _getCachedPath(photoPath);
+      if (cached != null && File(cached).existsSync()) {
+        if (mounted) setState(() { _resolvedPhotoPath = cached; _resolvingPhoto = false; });
+        return;
+      }
+
+      // Download from cloud and cache locally
+      if (mounted) setState(() { _resolvingPhoto = true; });
+      final localPath = await _downloadAndCache(photoPath);
+      if (localPath != null && mounted) {
+        setState(() { _resolvedPhotoPath = localPath; _resolvingPhoto = false; });
+        // Update provider so other tiles benefit too
+        if (order.id != null) {
+          try { context.read<HistoryProvider>().updatePhotoLocal(order.id!, localPath); } catch (_) {}
+        }
+        return;
+      }
+      // Download failed → fall back to cloud URL
+      if (mounted) setState(() { _resolvedPhotoPath = photoPath; _resolvingPhoto = false; });
+      return;
+    }
+
+    // Local path but file missing, and no cloud URL available
+    if (mounted) setState(() { _resolvedPhotoPath = null; _resolvingPhoto = false; });
+  }
+
+  Future<String?> _getCachedPath(String cloudUrl) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = cloudUrl.hashCode.toString() + '.jpg';
+      final file = File(p.join(dir.path, 'photo_cache', fileName));
+      if (file.existsSync()) return file.path;
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> _downloadAndCache(String cloudUrl) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory(p.join(dir.path, 'photo_cache'));
+      if (!cacheDir.existsSync()) await cacheDir.create(recursive: true);
+      final fileName = cloudUrl.hashCode.toString() + '.jpg';
+      final file = File(p.join(cacheDir.path, fileName));
+      final response = await HttpClient().getUrl(Uri.parse(cloudUrl));
+      final httpResponse = await response.close();
+      if (httpResponse.statusCode == 200) {
+        await httpResponse.pipe(file.openWrite());
+        return file.path;
+      }
+    } catch (e) {
+      debugPrint('[History] downloadAndCache error: $e');
+    }
+    return null;
+  }
 
   Color _parseCatColor(String hex) {
     try {
@@ -577,7 +671,6 @@ class _OrderTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = AppTheme.getMarketplaceColor(order.marketplace);
     final time = DateFormat('HH:mm').format(order.scannedAt);
-    final hasPhoto = order.photoPath != null;
 
     return Dismissible(
       key: ValueKey(order.id),
@@ -616,64 +709,7 @@ class _OrderTile extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 3),
         child: ListTile(
           dense: true,
-          leading: hasPhoto
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: order.photoPath!.startsWith('http')
-                      ? Image.network(
-                          order.photoPath!,
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => CircleAvatar(
-                            backgroundColor: color.withValues(alpha: 0.15),
-                            radius: 20,
-                            child: Text(
-                              order.marketplace.substring(0, 1),
-                              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                          ),
-                        )
-                      : File(order.photoPath!).existsSync()
-                          ? Image.file(
-                              File(order.photoPath!),
-                              width: 40,
-                              height: 40,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => CircleAvatar(
-                                backgroundColor: color.withValues(alpha: 0.15),
-                                radius: 20,
-                                child: Text(
-                                  order.marketplace.substring(0, 1),
-                                  style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16),
-                                ),
-                              ),
-                            )
-                          : CircleAvatar(
-                              backgroundColor: color.withValues(alpha: 0.15),
-                              radius: 20,
-                              child: Text(
-                                order.marketplace.substring(0, 1),
-                                style: TextStyle(
-                                  color: color,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                )
-              : CircleAvatar(
-                  backgroundColor: color.withValues(alpha: 0.15),
-                  radius: 20,
-                  child: Text(
-                    order.marketplace.substring(0, 1),
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
+          leading: _buildLeading(color),
           title: Text(
             order.resi,
             style: const TextStyle(
@@ -768,13 +804,13 @@ class _OrderTile extends StatelessWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (hasPhoto)
+              if (_resolvedPhotoPath != null || (order.photoPath != null && _resolvingPhoto))
                 Icon(
-                  Icons.image,
+                  _resolvingPhoto ? Icons.cloud_download : Icons.image,
                   size: 16,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: _resolvingPhoto ? Colors.orange : Theme.of(context).colorScheme.primary,
                 ),
-              if (!hasPhoto)
+              if (_resolvedPhotoPath == null && !_resolvingPhoto && order.photoPath == null)
                 IconButton(
                   icon: const Icon(Icons.add_a_photo, size: 16),
                   color: Colors.grey,
@@ -802,7 +838,10 @@ class _OrderTile extends StatelessWidget {
             );
           },
           onLongPress: () {
-            if (hasPhoto) {
+            if (_resolvedPhotoPath != null) {
+              _showPhotoDialog(context, _resolvedPhotoPath!);
+            } else if (order.photoPath != null && _resolvingPhoto) {
+              // Still downloading, show cloud version
               _showPhotoDialog(context, order.photoPath!);
             } else {
               _showPhotoOptions(context);
@@ -856,14 +895,61 @@ class _OrderTile extends StatelessWidget {
     );
   }
 
+  Widget _buildLeading(Color color) {
+    if (_resolvedPhotoPath != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(_resolvedPhotoPath!),
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildAvatar(color),
+        ),
+      );
+    }
+    if (order.photoPath != null && _resolvingPhoto) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          order.photoPath!,
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildAvatar(color),
+        ),
+      );
+    }
+    return _buildAvatar(color);
+  }
+
+  Widget _buildAvatar(Color color) {
+    return CircleAvatar(
+      backgroundColor: color.withValues(alpha: 0.15),
+      radius: 20,
+      child: Text(
+        order.marketplace.substring(0, 1),
+        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16),
+      ),
+    );
+  }
+
   Future<void> _downloadPhoto(BuildContext context, String photoPath) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final fileName = 'scanorder_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final dest = File(p.join(dir.path, fileName));
-      await File(photoPath).copy(dest.path);
-
-      // Share file so user can save to gallery / downloads
+      if (photoPath.startsWith('http')) {
+        final response = await HttpClient().getUrl(Uri.parse(photoPath));
+        final httpResponse = await response.close();
+        if (httpResponse.statusCode == 200) {
+          await httpResponse.pipe(dest.openWrite());
+        } else {
+          throw Exception('HTTP ${httpResponse.statusCode}');
+        }
+      } else {
+        await File(photoPath).copy(dest.path);
+      }
       await Share.shareXFiles(
         [XFile(dest.path)],
         text: 'Foto Scan Resi',

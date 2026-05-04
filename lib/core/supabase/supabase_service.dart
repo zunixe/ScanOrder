@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
@@ -834,6 +835,156 @@ class SupabaseService {
       code += chars[(n + i * 7) % chars.length];
     }
     return code;
+  }
+
+  // ── Single-device session management ──
+
+  /// Get or create a stable device ID for this device
+  Future<String> getDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    var deviceId = prefs.getString('device_id');
+    if (deviceId == null) {
+      // Generate a unique device ID and persist it
+      deviceId = 'dev_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
+      await prefs.setString('device_id', deviceId);
+    }
+    return deviceId;
+  }
+
+  /// Register this device as the active session for the user.
+  /// Returns true if registration succeeded (this device is now the active session).
+  /// Returns false if another device is already active (login rejected).
+  Future<bool> registerSession() async {
+    final client = _client;
+    if (client == null) return true; // offline mode — allow
+    final user = currentUser;
+    if (user == null) return false;
+    try {
+      final deviceId = await getDeviceId();
+      // Upsert: replace any existing session for this user with this device
+      await client.from('user_sessions').upsert({
+        'user_id': user.id,
+        'device_id': deviceId,
+        'last_heartbeat': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id');
+      debugPrint('[Supabase] Session registered: userId=${user.id}, deviceId=$deviceId');
+      return true;
+    } catch (e) {
+      debugPrint('[Supabase] registerSession error: $e');
+      return false;
+    }
+  }
+
+  /// Check if this device is still the active session.
+  /// Returns true if this device is the active session (or if offline).
+  /// Returns false if another device has taken over (should force logout).
+  Future<bool> isSessionValid() async {
+    final client = _client;
+    if (client == null) return true; // offline — assume valid
+    final user = currentUser;
+    if (user == null) return false;
+    try {
+      final deviceId = await getDeviceId();
+      final response = await client
+          .from('user_sessions')
+          .select('device_id, last_heartbeat')
+          .eq('user_id', user.id)
+          .maybeSingle();
+      if (response == null) return true; // no session record — valid
+      final activeDeviceId = response['device_id'] as String;
+      if (activeDeviceId != deviceId) {
+        debugPrint('[Supabase] Session hijacked: active=$activeDeviceId, this=$deviceId');
+        return false; // another device took over
+      }
+      return true;
+    } catch (e) {
+      debugPrint('[Supabase] isSessionValid error: $e');
+      return true; // on error, assume valid to avoid disruptive logout
+    }
+  }
+
+  /// Send heartbeat to keep session alive.
+  /// Should be called periodically (every ~5 minutes).
+  Future<void> sendHeartbeat() async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    try {
+      final deviceId = await getDeviceId();
+      await client.from('user_sessions').upsert({
+        'user_id': user.id,
+        'device_id': deviceId,
+        'last_heartbeat': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'user_id');
+    } catch (e) {
+      debugPrint('[Supabase] sendHeartbeat error: $e');
+    }
+  }
+
+  /// Clear this user's session (called on logout).
+  Future<void> clearSession() async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    try {
+      await client.from('user_sessions').delete().eq('user_id', user.id);
+      debugPrint('[Supabase] Session cleared for userId=${user.id}');
+    } catch (e) {
+      debugPrint('[Supabase] clearSession error: $e');
+    }
+  }
+
+  // ── Login history with geolocation ──
+
+  /// Insert a login history record with location data
+  Future<void> insertLoginHistory({
+    required String deviceId,
+    double? latitude,
+    double? longitude,
+    String? city,
+    String? region,
+    String? country,
+  }) async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    try {
+      await client.from('login_history').insert({
+        'user_id': user.id,
+        'email': user.email,
+        'device_id': deviceId,
+        'latitude': latitude,
+        'longitude': longitude,
+        'city': city,
+        'region': region,
+        'country': country,
+        'login_at': DateTime.now().toUtc().toIso8601String(),
+      });
+      debugPrint('[Supabase] Login history saved: lat=$latitude, lng=$longitude, city=$city');
+    } catch (e) {
+      debugPrint('[Supabase] insertLoginHistory error: $e');
+    }
+  }
+
+  /// Fetch login history for a specific user (admin use)
+  Future<List<Map<String, dynamic>>> fetchLoginHistory(String userId) async {
+    final client = _client;
+    if (client == null) return [];
+    try {
+      final response = await client
+          .from('login_history')
+          .select()
+          .eq('user_id', userId)
+          .order('login_at', ascending: false)
+          .limit(50);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('[Supabase] fetchLoginHistory error: $e');
+      return [];
+    }
   }
 
   /// Stream auth state changes

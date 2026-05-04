@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
@@ -17,6 +19,10 @@ class AuthProvider extends ChangeNotifier {
   // Team state
   Team? _currentTeam;
   List<TeamMember> _teamMembers = [];
+
+  // Single-device session
+  Timer? _heartbeatTimer;
+  static const Duration _heartbeatInterval = Duration(minutes: 5);
 
   bool get isLoggedIn => _isLoggedIn;
   bool get isLoading => _isLoading;
@@ -37,8 +43,14 @@ class AuthProvider extends ChangeNotifier {
           notifyListeners();
           await _checkAdminPro();
           await _loadTeam();
+          // Register session & start heartbeat for non-free users
+          await _registerSessionIfNeeded();
+          _startHeartbeat();
+          // Save login history with location
+          await _saveLoginHistory();
           await syncOnLogin();
         } else {
+          _stopTimers();
           _currentTeam = null;
         }
         notifyListeners();
@@ -266,6 +278,9 @@ class AuthProvider extends ChangeNotifier {
         password: password,
       );
       _isLoggedIn = true;
+      // Register session after successful login
+      await _registerSessionIfNeeded();
+      _startHeartbeat();
     } catch (e) {
       _error = 'Login gagal: $e';
     } finally {
@@ -294,7 +309,9 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signOut() async {
     _isLoading = true;
     notifyListeners();
+    _stopTimers();
     try {
+      await _supabase.clearSession();
       await _supabase.signOut();
       await QuotaService().purchaseOrChangeTier(StorageTier.free, carryOver: false);
       _isLoggedIn = false;
@@ -303,6 +320,111 @@ class AuthProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  /// Auto logout because another device took over the session
+  Future<void> _autoLogout() async {
+    _stopTimers();
+    _isLoggedIn = false;
+    _currentTeam = null;
+    // Silent logout — no error message, just sign out
+    try {
+      await _supabase.signOut();
+    } catch (_) {}
+    notifyListeners();
+  }
+
+  /// Check session validity — called on app resume
+  Future<void> checkSessionOnResume() async {
+    try {
+      final quota = QuotaService();
+      final tier = await quota.getTier();
+      if (tier == StorageTier.free) return;
+      if (!_isLoggedIn) return;
+      final valid = await _supabase.isSessionValid();
+      if (!valid) {
+        debugPrint('[AuthProvider] Session invalid on resume — auto logout');
+        await _autoLogout();
+      }
+    } catch (e) {
+      debugPrint('[AuthProvider] checkSessionOnResume error: $e');
+    }
+  }
+
+  /// Save login history with GPS location to Supabase
+  Future<void> _saveLoginHistory() async {
+    try {
+      final deviceId = await _supabase.getDeviceId();
+      double? latitude;
+      double? longitude;
+
+      // Try to get GPS location
+      try {
+        final permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          final requested = await Geolocator.requestPermission();
+          if (requested == LocationPermission.denied ||
+              requested == LocationPermission.deniedForever) {
+            debugPrint('[AuthProvider] Location permission denied');
+          }
+        }
+
+        final enabled = await Geolocator.isLocationServiceEnabled();
+        if (enabled) {
+          final position = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.low,
+              timeLimit: Duration(seconds: 5),
+            ),
+          );
+          latitude = position.latitude;
+          longitude = position.longitude;
+        }
+      } catch (e) {
+        debugPrint('[AuthProvider] Get location error: $e');
+      }
+
+      await _supabase.insertLoginHistory(
+        deviceId: deviceId,
+        latitude: latitude,
+        longitude: longitude,
+      );
+    } catch (e) {
+      debugPrint('[AuthProvider] saveLoginHistory error: $e');
+    }
+  }
+
+  /// Register session for non-free users (single-device constraint)
+  Future<void> _registerSessionIfNeeded() async {
+    try {
+      final quota = QuotaService();
+      final tier = await quota.getTier();
+      // Only enforce single-device for basic, pro, and team (unlimited)
+      if (tier == StorageTier.free) return;
+      await _supabase.registerSession();
+    } catch (e) {
+      debugPrint('[AuthProvider] registerSession error: $e');
+    }
+  }
+
+  /// Start periodic heartbeat to keep session alive
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) async {
+      try {
+        final quota = QuotaService();
+        final tier = await quota.getTier();
+        if (tier == StorageTier.free) return;
+        await _supabase.sendHeartbeat();
+      } catch (e) {
+        debugPrint('[AuthProvider] heartbeat error: $e');
+      }
+    });
+  }
+
+  void _stopTimers() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
   }
 
   void clearError() {
