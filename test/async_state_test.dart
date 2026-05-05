@@ -109,4 +109,82 @@ void main() {
       expect(errResult.retry, isNotNull);
     });
   });
+
+  group('AsyncState equality', () {
+    test('idle states are equal', () {
+      const a = AsyncState<int>.idle();
+      const b = AsyncState<int>.idle();
+      expect(a, b);
+    });
+
+    test('data states with same value are equal', () {
+      const a = AsyncState<int>.data(5);
+      const b = AsyncState<int>.data(5);
+      expect(a, b);
+    });
+
+    test('data states with different values are not equal', () {
+      const a = AsyncState<int>.data(5);
+      const b = AsyncState<int>.data(10);
+      expect(a, isNot(equals(b)));
+    });
+
+    test('loading states with same previous data are equal', () {
+      const a = AsyncState<int>.loading(previousData: 5);
+      const b = AsyncState<int>.loading(previousData: 5);
+      expect(a, b);
+    });
+
+    test('loading without previous data differs from loading with', () {
+      const a = AsyncState<int>.loading();
+      const b = AsyncState<int>.loading(previousData: 5);
+      expect(a, isNot(equals(b)));
+    });
+  });
+
+  group('AsyncState whenOrElse', () {
+    test('maybeWhen with loading match', () {
+      const state = AsyncState<int>.loading();
+      expect(
+        state.maybeWhen(loading: (_) => 'loading', orElse: () => 'other'),
+        'loading',
+      );
+    });
+
+    test('maybeWhen with error match', () {
+      final state = AsyncState<int>.error('fail');
+      expect(
+        state.maybeWhen(error: (e, s, r) => 'err:$e', orElse: () => 'other'),
+        'err:fail',
+      );
+    });
+
+    test('maybeWhen with idle match', () {
+      const state = AsyncState<int>.idle();
+      expect(
+        state.maybeWhen(idle: () => 'idle', orElse: () => 'other'),
+        'idle',
+      );
+    });
+  });
+
+  group('runAsync edge cases', () {
+    test('returns data immediately for fast operations', () async {
+      final result = await runAsync(() async => 'quick');
+      expect(result, isA<AsyncStateData<String>>());
+      expect((result as AsyncStateData<String>).value, 'quick');
+    });
+
+    test('error message contains exception text', () async {
+      final result = await runAsync<int>(() async => throw FormatException('bad format'));
+      expect(result, isA<AsyncStateError<int>>());
+      expect((result as AsyncStateError<int>).message, contains('bad format'));
+    });
+
+    test('error state has stack trace', () async {
+      final result = await runAsync<int>(() async => throw Exception('err'));
+      final errResult = result as AsyncStateError<int>;
+      expect(errResult.stackTrace, isNotNull);
+    });
+  });
 }

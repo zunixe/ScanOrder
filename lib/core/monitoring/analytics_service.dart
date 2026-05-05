@@ -62,7 +62,7 @@ class AnalyticsService {
   static Future<void> exportData(String format) =>
       track('export_data', properties: {'format': format});
   static Future<void> syncComplete({int? count}) =>
-      track('sync_complete', properties: {if (count != null) 'count': count});
+      track('sync_complete', properties: {'count': ?count});
   static Future<void> syncError(String error) =>
       track('sync_error', properties: {'error': error});
   static Future<void> categoryCreated(String name) =>

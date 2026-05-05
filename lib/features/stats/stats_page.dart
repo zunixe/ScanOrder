@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/logging/logger.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:fl_chart/fl_chart.dart';
@@ -605,7 +604,7 @@ class _StatsPageState extends State<StatsPage> {
                                 cloudPhotoUrls[resi] = (row['photo_url'] as String?) ?? '';
                               }
                             } catch (e) {
-                              AppLogger.info('Stats', 'Failed to fetch cloud scans: $e');
+                              debugPrint('[Stats] Failed to fetch cloud scans: $e');
                             }
                           }
 
@@ -659,21 +658,21 @@ class _StatsPageState extends State<StatsPage> {
                               final resi = entry.key;
                               final cloudPhotoUrl = entry.value;
                               if (cloudPhotoUrl.isNotEmpty && !cloudPhotoUrl.startsWith('http')) {
-                                AppLogger.info('Stats', 'Sync: found unsynced photo in cloud, resi=$resi, cloudPhotoUrl=$cloudPhotoUrl');
+                                debugPrint('[Stats] Sync: found unsynced photo in cloud, resi=$resi, cloudPhotoUrl=$cloudPhotoUrl');
                                 // Cloud has local path — check if local DB has cloud URL
                                 final localPath = localPhotoPaths[resi];
-                                AppLogger.info('Stats', 'Sync: localPath for resi=$resi is $localPath');
+                                debugPrint('[Stats] Sync: localPath for resi=$resi is $localPath');
                                 if (localPath != null && localPath.startsWith('http')) {
                                   // Local already synced, just update Supabase
                                   try {
                                     await client.from('scans').update({'photo_url': localPath}).eq('resi', resi);
-                                    AppLogger.info('Stats', 'Fixed photo_url in Supabase for resi=$resi');
+                                    debugPrint('[Stats] Fixed photo_url in Supabase for resi=$resi');
                                   } catch (e) {
-                                    AppLogger.info('Stats', 'Failed to fix photo_url for resi=$resi: $e');
+                                    debugPrint('[Stats] Failed to fix photo_url for resi=$resi: $e');
                                   }
                                 } else if (localPath != null && localPath.isNotEmpty && !localPath.startsWith('http') && File(localPath).existsSync()) {
                                   // Local file still exists, re-enqueue upload
-                                  AppLogger.info('Stats', 'Sync: re-enqueue upload for resi=$resi, localPath=$localPath');
+                                  debugPrint('[Stats] Sync: re-enqueue upload for resi=$resi, localPath=$localPath');
                                   syncQueue.enqueue(SyncTaskType.uploadPhoto, {
                                     'local_path': localPath,
                                     'user_id': userId,
@@ -684,12 +683,12 @@ class _StatsPageState extends State<StatsPage> {
                                   // Scan exists in Supabase with local photo_url, but no local file available
                                   // This means the photo was never uploaded and the local file is gone
                                   // Clear the stale local path in Supabase to fix the count
-                                  AppLogger.info('Stats', 'Sync: no local file for resi=$resi, clearing stale photo_url in Supabase');
+                                  debugPrint('[Stats] Sync: no local file for resi=$resi, clearing stale photo_url in Supabase');
                                   try {
                                     await client.from('scans').update({'photo_url': null}).eq('resi', resi);
-                                    AppLogger.info('Stats', 'Sync: cleared stale photo_url for resi=$resi');
+                                    debugPrint('[Stats] Sync: cleared stale photo_url for resi=$resi');
                                   } catch (e) {
-                                    AppLogger.info('Stats', 'Sync: failed to clear photo_url for resi=$resi: $e');
+                                    debugPrint('[Stats] Sync: failed to clear photo_url for resi=$resi: $e');
                                   }
                                 }
                               }
@@ -703,9 +702,9 @@ class _StatsPageState extends State<StatsPage> {
                                 if (localPath != null && localPath.startsWith('http')) {
                                   try {
                                     await client.from('scans').update({'photo_url': localPath}).eq('resi', resi);
-                                    AppLogger.info('Stats', 'Sync: fixed null photo_url in Supabase for resi=$resi');
+                                    debugPrint('[Stats] Sync: fixed null photo_url in Supabase for resi=$resi');
                                   } catch (e) {
-                                    AppLogger.info('Stats', 'Sync: failed to fix null photo_url for resi=$resi: $e');
+                                    debugPrint('[Stats] Sync: failed to fix null photo_url for resi=$resi: $e');
                                   }
                                 }
                               }
@@ -837,9 +836,9 @@ class _StatsPageState extends State<StatsPage> {
           body: InteractiveViewer(
             child: Center(
               child: photoPath.startsWith('http')
-                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, _u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, _u, _e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, u, e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                   : File(photoPath).existsSync()
-                      ? Image.file(File(photoPath), fit: BoxFit.contain, errorBuilder: (_, _e, _s) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                      ? Image.file(File(photoPath), fit: BoxFit.contain, errorBuilder: (_, e, s) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                       : const Icon(Icons.broken_image, size: 64, color: Colors.grey),
             ),
           ),

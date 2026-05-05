@@ -171,5 +171,87 @@ void main() {
       expect(cat.createdAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
       expect(cat.createdAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
     });
+
+    test('copyWith with all parameters', () {
+      final cat = ScanCategory(id: 1, name: 'Old', color: '#000', userId: 'u1');
+      final copy = cat.copyWith(id: 2, name: 'New', color: '#FFF', userId: 'u2');
+      expect(copy.id, 2);
+      expect(copy.name, 'New');
+      expect(copy.color, '#FFF');
+      expect(copy.userId, 'u2');
+    });
+
+    test('copyWith preserves createdAt', () {
+      final now = DateTime(2026, 5, 6);
+      final cat = ScanCategory(id: 1, name: 'Test', color: '#000', createdAt: now);
+      final copy = cat.copyWith(name: 'Updated');
+      expect(copy.createdAt, now);
+    });
+
+    test('fromSupabase parses correctly', () {
+      final now = DateTime(2026, 5, 6);
+      final map = {
+        'id': 10,
+        'name': 'SupabaseCat',
+        'color': '#E91E63',
+        'user_id': 'u123',
+        'created_at': now.millisecondsSinceEpoch,
+      };
+      final cat = ScanCategory.fromSupabase(map);
+      expect(cat.id, 10);
+      expect(cat.name, 'SupabaseCat');
+      expect(cat.color, '#E91E63');
+      expect(cat.userId, 'u123');
+    });
+
+    test('fromJson with ISO string date', () {
+      final map = {
+        'id': 5,
+        'name': 'ISO Cat',
+        'color': '#9C27B0',
+        'user_id': null,
+        'created_at': '2026-05-06T10:30:00.000Z',
+      };
+      final cat = ScanCategory.fromJson(map);
+      expect(cat.name, 'ISO Cat');
+      expect(cat.createdAt.year, 2026);
+    });
+
+    test('toJson converts to milliseconds', () {
+      final now = DateTime(2026, 5, 6, 10, 30);
+      final cat = ScanCategory(id: 1, name: 'Test', color: '#000', createdAt: now);
+      final json = cat.toJson();
+      expect(json['created_at'], now.millisecondsSinceEpoch);
+    });
+
+    test('equality with null id', () {
+      final a = ScanCategory(name: 'A', color: '#000');
+      final b = ScanCategory(name: 'B', color: '#FFF');
+      expect(a == b, isTrue); // both null id
+    });
+
+    test('equality with same id', () {
+      final a = ScanCategory(id: 1, name: 'A', color: '#000');
+      final b = ScanCategory(id: 1, name: 'B', color: '#FFF');
+      expect(a == b, isTrue);
+    });
+
+    test('inequality with different id', () {
+      final a = ScanCategory(id: 1, name: 'A', color: '#000');
+      final b = ScanCategory(id: 2, name: 'A', color: '#000');
+      expect(a == b, isFalse);
+    });
+
+    test('hashCode based on id', () {
+      final a = ScanCategory(id: 1, name: 'A', color: '#000');
+      final b = ScanCategory(id: 1, name: 'B', color: '#FFF');
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('copyWith with null id', () {
+      final cat = ScanCategory(name: 'Test', color: '#000');
+      final copy = cat.copyWith(name: 'Updated');
+      expect(copy.id, isNull);
+    });
   });
 }

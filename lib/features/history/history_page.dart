@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../core/logging/logger.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -651,7 +650,7 @@ class _OrderTileState extends State<_OrderTile> {
   Future<String?> _getCachedPath(String cloudUrl) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final fileName = cloudUrl.hashCode.toString() + '.jpg';
+      final fileName = '${cloudUrl.hashCode}.jpg';
       final file = File(p.join(dir.path, 'photo_cache', fileName));
       if (file.existsSync()) return file.path;
     } catch (_) {}
@@ -663,7 +662,7 @@ class _OrderTileState extends State<_OrderTile> {
       final dir = await getApplicationDocumentsDirectory();
       final cacheDir = Directory(p.join(dir.path, 'photo_cache'));
       if (!cacheDir.existsSync()) await cacheDir.create(recursive: true);
-      final fileName = cloudUrl.hashCode.toString() + '.jpg';
+      final fileName = '${cloudUrl.hashCode}.jpg';
       final file = File(p.join(cacheDir.path, fileName));
       final response = await HttpClient().getUrl(Uri.parse(cloudUrl));
       final httpResponse = await response.close();
@@ -672,7 +671,7 @@ class _OrderTileState extends State<_OrderTile> {
         return file.path;
       }
     } catch (e) {
-      AppLogger.error('History', 'downloadAndCache error', exception: e);
+      debugPrint('[History] downloadAndCache error: $e');
     }
     return null;
   }
@@ -904,7 +903,7 @@ class _OrderTileState extends State<_OrderTile> {
             maxScale: 4.0,
             child: Center(
               child: photoPath.startsWith('http')
-                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, _u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, _u, _e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, u, e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                   : Image.file(File(photoPath), fit: BoxFit.contain),
             ),
           ),
@@ -922,7 +921,7 @@ class _OrderTileState extends State<_OrderTile> {
           width: 40,
           height: 40,
           fit: BoxFit.cover,
-          errorBuilder: (_, _e, _s) => _buildAvatar(color),
+          errorBuilder: (_, e, s) => _buildAvatar(color),
         ),
       );
     }
@@ -934,7 +933,7 @@ class _OrderTileState extends State<_OrderTile> {
           width: 40,
           height: 40,
           fit: BoxFit.cover,
-          errorWidget: (_, _u, _e) => _buildAvatar(color),
+          errorWidget: (_, u, e) => _buildAvatar(color),
         ),
       );
     }

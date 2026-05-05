@@ -43,3 +43,4 @@ Icon?
 *.swo
 *~
 .flutter-plugins-dependencies
+coverage/

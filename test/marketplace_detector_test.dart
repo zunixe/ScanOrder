@@ -58,6 +58,26 @@ void main() {
 
     // Trim whitespace
     test('whitespace trimmed', () => expect(MarketplaceDetector.detect('  SPX123456789  '), 'Shopee'));
+
+    // Additional patterns
+    test('26xxxxx pattern → Shopee', () => expect(MarketplaceDetector.detect('2612345ABCDEF'), 'Shopee'));
+    test('25xxxxx pattern → Shopee', () => expect(MarketplaceDetector.detect('2512345ABCDEF'), 'Shopee'));
+    test('JX prefix → J&T', () => expect(MarketplaceDetector.detect('JX1234567890'), 'J&T'));
+    test('JO prefix → J&T', () => expect(MarketplaceDetector.detect('JO1234567890'), 'J&T'));
+    test('JT prefix → J&T', () => expect(MarketplaceDetector.detect('JT1234567890'), 'J&T'));
+    test('J&T prefix → J&T', () => expect(MarketplaceDetector.detect('J&T123456'), 'J&T'));
+    test('SC prefix → SiCepat', () => expect(MarketplaceDetector.detect('SC1234567890'), 'SiCepat'));
+    test('SICEPAT prefix → SiCepat', () => expect(MarketplaceDetector.detect('SICEPAT123'), 'SiCepat'));
+    test('12-digit number → SiCepat', () => expect(MarketplaceDetector.detect('123456789012'), 'SiCepat'));
+    test('ANTERAJA prefix → AnterAja', () => expect(MarketplaceDetector.detect('ANTERAJA123'), 'AnterAja'));
+    test('NINJA prefix → Ninja', () => expect(MarketplaceDetector.detect('NINJA123'), 'Ninja'));
+    test('15-20 digit number → Tokopedia', () => expect(MarketplaceDetector.detect('123456789012345'), 'Tokopedia'));
+    test('TSPX prefix → Paxel', () => expect(MarketplaceDetector.detect('TSPX123456'), 'Paxel'));
+    test('TLJN prefix → JNE', () => expect(MarketplaceDetector.detect('TLJN1234567890'), 'JNE'));
+    test('MDN prefix → JNE', () => expect(MarketplaceDetector.detect('MDN1234567890'), 'JNE'));
+    test('UPG prefix → JNE', () => expect(MarketplaceDetector.detect('UPG1234567890'), 'JNE'));
+    test('CL prefix → JNE', () => expect(MarketplaceDetector.detect('CL1234567890'), 'JNE'));
+    test('IN prefix → JNE', () => expect(MarketplaceDetector.detect('IN1234567890'), 'JNE'));
   });
 
   group('MarketplaceDetector.isValidResi', () {

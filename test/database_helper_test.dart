@@ -231,5 +231,277 @@ void main() {
         expect(teamScans.first.resi, 'SPXT1');
       });
     });
+
+    group('Additional queries', () {
+      test('getOrderCountByDate', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'CNT1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'CNT2', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'CNT3', marketplace: 'J&T', scannedAt: now, date: '2026-01-01'), userId: 'u1');
+
+        final count = await db.getOrderCountByDate(date, userId: 'u1');
+        expect(count, 2);
+      });
+
+      test('getDistinctDates', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'DT1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'DT2', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'DT3', marketplace: 'J&T', scannedAt: now, date: '2026-01-01'), userId: 'u1');
+
+        final dates = await db.getDistinctDates(userId: 'u1');
+        expect(dates.length, 2);
+      });
+
+      test('updateScanPhoto', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'PHOTO1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final scan = await db.findByResi('PHOTO1', userId: 'u1');
+
+        await db.updateScanPhoto(scan!.id!, '/new/photo.jpg');
+        final updated = await db.findByResi('PHOTO1', userId: 'u1');
+        expect(updated!.photoPath, '/new/photo.jpg');
+      });
+
+      test('updateScanPhoto to null', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'PHOTO2', marketplace: 'Shopee', scannedAt: now, date: date, photoPath: '/old.jpg'), userId: 'u1');
+        final scan = await db.findByResi('PHOTO2', userId: 'u1');
+
+        await db.updateScanPhoto(scan!.id!, null);
+        final updated = await db.findByResi('PHOTO2', userId: 'u1');
+        expect(updated!.photoPath, isNull);
+      });
+
+      test('searchScans with teamId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'TEAMSEARCH1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1', teamId: 'team1');
+        await db.insertScan(ScanRecord(resi: 'PERSONALSEARCH', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1');
+
+        final results = await db.searchScans('SEARCH', teamId: 'team1');
+        expect(results.length, 1);
+        expect(results.first.resi, 'TEAMSEARCH1');
+      });
+
+      test('updateOrderSyncStatusByResi with teamId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'TEAMSYNC', marketplace: 'Shopee', scannedAt: now, date: date, syncStatus: 'pending'), userId: 'u1', teamId: 'team1');
+        await db.updateOrderSyncStatusByResi('TEAMSYNC', 'synced', teamId: 'team1');
+
+        final scans = await db.getScansByDate(date, teamId: 'team1');
+        expect(scans.first.syncStatus, 'synced');
+      });
+
+      test('getMarketplaceStats with date filter', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'MS1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'MS2', marketplace: 'JNE', scannedAt: now, date: '2026-01-01'), userId: 'u1');
+
+        final stats = await db.getMarketplaceStats(date: date, userId: 'u1');
+        expect(stats.length, 1);
+        expect(stats['Shopee'], 1);
+      });
+
+      test('getCategoryStats', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'CATSTAT', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final catId = await db.insertCategory(ScanCategory(name: 'StatCat', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, catId);
+
+        final stats = await db.getCategoryStats(userId: 'u1');
+        expect(stats, isNotEmpty);
+        expect(stats['StatCat'], 1);
+      });
+
+      test('updateCategory', () async {
+        final catId = await db.insertCategory(ScanCategory(name: 'Old', color: '#000', userId: 'u1'));
+        final cat = await db.getCategoryById(catId);
+        await db.updateCategory(ScanCategory(id: catId, name: 'Updated', color: '#FFF', userId: 'u1', createdAt: cat!.createdAt));
+        final updated = await db.getCategoryById(catId);
+        expect(updated!.name, 'Updated');
+        expect(updated.color, '#FFF');
+      });
+
+      test('getScansByCategory', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'CATSCAN', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final catId = await db.insertCategory(ScanCategory(name: 'CatA', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, catId);
+
+        final scans = await db.getScansByCategory(catId, userId: 'u1');
+        expect(scans.length, 1);
+        expect(scans.first.resi, 'CATSCAN');
+      });
+
+      test('getCategoryCounts', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final s1 = await db.insertScan(ScanRecord(resi: 'CC1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final s2 = await db.insertScan(ScanRecord(resi: 'CC2', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1');
+        final catId = await db.insertCategory(ScanCategory(name: 'CCCat', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(s1, catId);
+        await db.assignCategoryToOrder(s2, catId);
+
+        final counts = await db.getCategoryCounts(userId: 'u1');
+        expect(counts[catId], 2);
+      });
+
+      test('getAllScanCategoriesWithResi', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'ASC1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final catId = await db.insertCategory(ScanCategory(name: 'ASCCat', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, catId);
+
+        final result = await db.getAllScanCategoriesWithResi();
+        expect(result, isNotEmpty);
+        expect(result.first['resi'], 'ASC1');
+      });
+
+      test('deleteTeamOrders', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'TEAM1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1', teamId: 'team1');
+        await db.insertScan(ScanRecord(resi: 'PERS1', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1');
+
+        await db.deleteTeamOrders('u1');
+        final teamScans = await db.getTeamScans();
+        expect(teamScans, isEmpty);
+        // Personal scan should remain
+        final personal = await db.getAllScans(userId: 'u1');
+        expect(personal.length, 1);
+      });
+
+      test('getTeamScans', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'TSCAN1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1', teamId: 'team1');
+
+        final teamScans = await db.getTeamScans();
+        expect(teamScans.length, 1);
+        expect(teamScans.first.resi, 'TSCAN1');
+      });
+
+      test('deleteTeamCategories', () async {
+        await db.insertCategory(ScanCategory(name: 'MyCat', color: '#000', userId: 'u1'));
+        await db.insertCategory(ScanCategory(name: 'AdminCat', color: '#FFF', userId: 'admin1'));
+
+        await db.deleteTeamCategories('u1');
+        final cats = await db.getAllCategories(userId: 'u1');
+        expect(cats.length, 1);
+        expect(cats.first.name, 'MyCat');
+      });
+
+      test('deleteAllScans', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'DEL1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'DEL2', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1');
+
+        await db.deleteAllScans();
+        final count = await db.getTotalOrderCount(userId: 'u1');
+        expect(count, 0);
+      });
+
+      test('updateTeamIdForUser', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'TEAMUP', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+
+        await db.updateTeamIdForUser('u1', 'team1');
+        final teamScans = await db.getTeamScans();
+        expect(teamScans.any((s) => s.resi == 'TEAMUP'), true);
+      });
+
+      test('deleteOrphanPersonalScans', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'ORPHAN1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        await db.insertScan(ScanRecord(resi: 'TEAMSCAN', marketplace: 'JNE', scannedAt: now, date: date), userId: 'u1', teamId: 'team1');
+
+        final deleted = await db.deleteOrphanPersonalScans('u1');
+        expect(deleted, 1);
+        // Team scan should remain
+        final teamScans = await db.getTeamScans();
+        expect(teamScans.length, 1);
+      });
+
+      test('deleteCategory removes associated orphan scans', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'DELCAT', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final catId = await db.insertCategory(ScanCategory(name: 'DelCat', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, catId);
+
+        await db.deleteCategory(catId);
+        final scan = await db.findByResi('DELCAT', userId: 'u1');
+        // Scan should be deleted since it was only in this category
+        expect(scan, isNull);
+      });
+
+      test('deleteCategory keeps scans in other categories', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'KEEPCAT', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1');
+        final cat1 = await db.insertCategory(ScanCategory(name: 'Cat1', color: '#000', userId: 'u1'));
+        final cat2 = await db.insertCategory(ScanCategory(name: 'Cat2', color: '#FFF', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, cat1);
+        await db.assignCategoryToOrder(scanId, cat2);
+
+        await db.deleteCategory(cat1);
+        final scan = await db.findByResi('KEEPCAT', userId: 'u1');
+        expect(scan, isNotNull);
+      });
+
+      test('getAllCategories with adminUserId for team', () async {
+        await db.insertCategory(ScanCategory(name: 'MyCat', color: '#000', userId: 'u1'));
+        await db.insertCategory(ScanCategory(name: 'AdminCat', color: '#FFF', userId: 'admin1'));
+
+        final cats = await db.getAllCategories(userId: 'u1', adminUserId: 'admin1');
+        expect(cats.length, 2);
+      });
+
+      test('getScansByCategory with teamId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'TCAT1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1', teamId: 'team1');
+        final catId = await db.insertCategory(ScanCategory(name: 'TCat', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, catId);
+
+        final scans = await db.getScansByCategory(catId, teamId: 'team1');
+        expect(scans.length, 1);
+      });
+
+      test('getCategoryStats with teamId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final scanId = await db.insertScan(ScanRecord(resi: 'TCS1', marketplace: 'Shopee', scannedAt: now, date: date), userId: 'u1', teamId: 'team1');
+        final catId = await db.insertCategory(ScanCategory(name: 'TCatStat', color: '#000', userId: 'u1'));
+        await db.assignCategoryToOrder(scanId, catId);
+
+        final stats = await db.getCategoryStats(teamId: 'team1');
+        expect(stats, isNotEmpty);
+      });
+
+      test('insertScan with scannedBy', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final id = await db.insertScan(
+          ScanRecord(resi: 'SBY1', marketplace: 'Shopee', scannedAt: now, date: date),
+          userId: 'u1',
+          scannedBy: 'scanner1',
+        );
+        expect(id, greaterThan(0));
+      });
+    });
   });
 }

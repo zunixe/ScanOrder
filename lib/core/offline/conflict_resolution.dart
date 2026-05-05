@@ -213,7 +213,7 @@ class ConflictRequiresManualResolutionException implements Exception {
   final DateTime localUpdatedAt;
   final DateTime serverUpdatedAt;
 
-  ConflictRequiresManualResolutionException({
+  const ConflictRequiresManualResolutionException({
     required this.tableName,
     required this.recordId,
     required this.localData,
