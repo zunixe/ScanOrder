@@ -782,13 +782,12 @@ class _UpgradeOption {
 class _FaqSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           'Pertanyaan Umum',
-          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: AppTheme.sectionTitleSize, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
         _FaqItem(
@@ -797,15 +796,15 @@ class _FaqSection extends StatelessWidget {
         ),
         _FaqItem(
           question: 'Apa perbedaan paket Gratis, Basic, Pro, dan Team?',
-          answer: '• Gratis: 10 scan/hari, tanpa foto\n• Basic: 50 scan/hari + foto + cloud sync\n• Pro: 200 scan/hari + foto + cloud sync + prioritas\n• Team: Unlimited scan + kolaborasi tim + kategori bersama',
+          answer: '• Gratis: 100 scan/bulan, tanpa foto\n• Basic: 1.000 scan/bulan + foto + cloud sync + export XLSX\n• Pro: 5.000 scan/bulan + foto + cloud sync + statistik lengkap\n• Team: Unlimited scan + kolaborasi tim hingga 10 anggota + kategori bersama',
         ),
         _FaqItem(
           question: 'Bagaimana cara kerja cloud sync?',
-          answer: 'Data scan disimpan lokal di HP dan otomatis dikirim ke Supabase cloud saat online. Jika offline, data masuk antrian dan akan sync saat koneksi kembali tersedia.',
+          answer: 'Data scan disimpan lokal di HP dan otomatis dikirim ke cloud milik kami saat online. Jika offline, data masuk antrian dan akan sync saat koneksi kembali tersedia.',
         ),
         _FaqItem(
           question: 'Apakah data saya aman?',
-          answer: 'Ya. Data tersimpan di Supabase dengan enkripsi. Foto disimpan di private storage bucket. Hanya Anda (dan anggota tim untuk mode Team) yang bisa mengakses.',
+          answer: 'Ya. Data tersimpan di cloud milik kami dengan enkripsi. Foto disimpan di storage privat. Hanya Anda (dan anggota tim untuk mode Team) yang bisa mengakses.',
         ),
         _FaqItem(
           question: 'Bagaimana cara bergabung dengan tim?',
@@ -813,7 +812,7 @@ class _FaqSection extends StatelessWidget {
         ),
         _FaqItem(
           question: 'Apa yang terjadi jika kuota habis?',
-          answer: 'Scan baru akan ditolak sampai kuota direset (esok hari) atau upgrade paket. Data yang sudah tersimpan tetap bisa dilihat dan diekspor.',
+          answer: 'Anda tidak bisa melakukan scan baru. Upgrade ke paket yang lebih tinggi untuk melanjutkan scan. Data yang sudah tersimpan tetap bisa dilihat dan diekspor.',
         ),
         _FaqItem(
           question: 'Bisa refund?',
@@ -821,7 +820,7 @@ class _FaqSection extends StatelessWidget {
         ),
         _FaqItem(
           question: 'Bagaimana cara backup data?',
-          answer: 'Masuk ke Pengaturan → Ekspor Data. Data bisa diekspor ke file CSV untuk backup. Data juga otomatis tersimpan di cloud jika berlangganan.',
+          answer: 'Masuk ke Pengaturan → Backup ke File untuk ekspor semua data ke JSON. Data juga otomatis tersimpan di cloud milik kami jika berlangganan.',
         ),
       ],
     );
@@ -842,7 +841,6 @@ class _FaqItemState extends State<_FaqItem> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
@@ -857,12 +855,13 @@ class _FaqItemState extends State<_FaqItem> {
                   Expanded(
                     child: Text(
                       widget.question,
-                      style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: AppTheme.cardTitleSize),
                     ),
                   ),
                   Icon(
                     _expanded ? Icons.expand_less : Icons.expand_more,
-                    color: theme.colorScheme.primary,
+                    color: AppTheme.primaryColor,
+                    size: 22,
                   ),
                 ],
               ),
@@ -870,7 +869,7 @@ class _FaqItemState extends State<_FaqItem> {
                 const SizedBox(height: 8),
                 Text(
                   widget.answer,
-                  style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color),
+                  style: TextStyle(fontSize: AppTheme.microSize, color: Colors.grey[600]),
                 ),
               ],
             ],
