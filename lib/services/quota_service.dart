@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import '../core/logging/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/db/database_helper.dart';
 import '../core/supabase/supabase_service.dart';
@@ -151,10 +151,10 @@ class QuotaService {
           features: (row['features'] as List?)?.map((e) => e.toString()).toList() ?? [],
           isPopular: row['is_popular'] as bool? ?? false,
         )).toList();
-        debugPrint('[QuotaService] Loaded ${_packages.length} packages from DB');
+        AppLogger.info('QuotaService', 'Loaded ${_packages.length} packages from DB');
       }
     } catch (e) {
-      debugPrint('[QuotaService] Failed to load packages from DB: $e');
+      AppLogger.info('QuotaService', 'Failed to load packages from DB: $e');
     }
   }
 
@@ -471,7 +471,7 @@ class QuotaService {
 
     // Jika tidak ada subscription by user_id, coba fetch by email (untuk Google login link)
     if (cloud == null && user?.email != null) {
-      debugPrint('[QuotaService] No subscription by user_id, trying email...');
+      AppLogger.info('QuotaService', 'No subscription by user_id, trying email...');
       final cloudByEmail = await _supabase.fetchSubscriptionByEmail(user!.email!);
       if (cloudByEmail != null) {
         // Copy subscription ke user_id baru dan update email
@@ -482,29 +482,29 @@ class QuotaService {
           'cycle_allowance': cloudByEmail['cycle_allowance'],
           'cycle_used': cloudByEmail['cycle_used'],
         });
-        debugPrint('[QuotaService] Subscription copied from email to new user_id');
+        AppLogger.info('QuotaService', 'Subscription copied from email to new user_id');
         // Fetch lagi sekarang sudah ada
         return syncFromCloud();
       }
-      debugPrint('[QuotaService] No subscription found in cloud for user ${user.id}');
+      AppLogger.info('QuotaService', 'No subscription found in cloud for user ${user.id}');
       // Cloud tidak punya data → pastikan cycle lokal ter-init dengan benar
       await _ensureCycleInitialized();
       return;
     }
     if (cloud == null) {
-      debugPrint('[QuotaService] No subscription in cloud, initializing local cycle');
+      AppLogger.info('QuotaService', 'No subscription in cloud, initializing local cycle');
       await _ensureCycleInitialized();
       return;
     }
 
-    debugPrint('[QuotaService] Cloud subscription: tier=${cloud['tier']}, allowance=${cloud['cycle_allowance']}, used=${cloud['cycle_used']}');
+    AppLogger.info('QuotaService', 'Cloud subscription: tier=${cloud['tier']}, allowance=${cloud['cycle_allowance']}, used=${cloud['cycle_used']}');
 
     final prefs = await SharedPreferences.getInstance();
     final cloudTierStr = (cloud['tier'] as String?) ?? 'free';
 
     // Abaikan tier 'pending' — subscription belum aktif, jangan timpa data lokal
     if (cloudTierStr == 'pending') {
-      debugPrint('[QuotaService] Cloud tier is pending, skipping sync');
+      AppLogger.info('QuotaService', 'Cloud tier is pending, skipping sync');
       await _ensureCycleInitialized();
       return;
     }

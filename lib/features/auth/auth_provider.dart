@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../core/logging/logger.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
@@ -97,7 +98,7 @@ class AuthProvider extends ChangeNotifier {
           final tier = await quota.getTier();
           final active = await quota.isSubscriptionActive();
           if (tier == StorageTier.free || !active) {
-            debugPrint('[AuthProvider] Team member subscription expired, auto-leaving team');
+            AppLogger.info('AuthProvider', 'Team member subscription expired, auto-leaving team');
             await leaveTeam();
             return;
           }
@@ -107,7 +108,7 @@ class AuthProvider extends ChangeNotifier {
       }
       teamState = const AsyncState.data(null);
     } catch (e, stack) {
-      debugPrint('Load team error: $e');
+      AppLogger.error('AuthProvider', 'Load team error', exception: e);
       teamState = AsyncState.error(e.toString(), stackTrace: stack, retry: _loadTeam);
     } finally {
       notifyListeners();
@@ -231,13 +232,13 @@ class AuthProvider extends ChangeNotifier {
         final file = File(path);
         if (await file.exists()) {
           await file.delete();
-          debugPrint('[AuthProvider] Deleted team photo: $path');
+          AppLogger.info('AuthProvider', 'Deleted team photo: $path');
         }
       }
 
-      debugPrint('[AuthProvider] Cleared team data from local DB');
+      AppLogger.info('AuthProvider', 'Cleared team data from local DB');
     } catch (e) {
-      debugPrint('[AuthProvider] Clear team data error: $e');
+      AppLogger.info('AuthProvider', 'Clear team data error: $e');
     }
   }
 
@@ -265,7 +266,7 @@ class AuthProvider extends ChangeNotifier {
       // Apply tier yang dipilih saat daftar
       if (tier != StorageTier.free) {
         await QuotaService().purchaseOrChangeTier(tier, carryOver: false);
-        debugPrint('[AuthProvider] Tier $tier applied on signup for $email');
+        AppLogger.info('AuthProvider', 'Tier $tier applied on signup for $email');
       }
     } catch (e) {
       _error = 'Signup gagal: $e';
@@ -368,11 +369,11 @@ class AuthProvider extends ChangeNotifier {
       if (!_isLoggedIn) return;
       final valid = await _supabase.isSessionValid();
       if (!valid) {
-        debugPrint('[AuthProvider] Session invalid on resume — auto logout');
+        AppLogger.info('AuthProvider', 'Session invalid on resume — auto logout');
         await _autoLogout();
       }
     } catch (e) {
-      debugPrint('[AuthProvider] checkSessionOnResume error: $e');
+      AppLogger.info('AuthProvider', 'checkSessionOnResume error: $e');
     }
   }
 
@@ -390,7 +391,7 @@ class AuthProvider extends ChangeNotifier {
           final requested = await Geolocator.requestPermission();
           if (requested == LocationPermission.denied ||
               requested == LocationPermission.deniedForever) {
-            debugPrint('[AuthProvider] Location permission denied');
+            AppLogger.info('AuthProvider', 'Location permission denied');
           }
         }
 
@@ -406,7 +407,7 @@ class AuthProvider extends ChangeNotifier {
           longitude = position.longitude;
         }
       } catch (e) {
-        debugPrint('[AuthProvider] Get location error: $e');
+        AppLogger.info('AuthProvider', 'Get location error: $e');
       }
 
       await _supabase.insertLoginHistory(
@@ -415,7 +416,7 @@ class AuthProvider extends ChangeNotifier {
         longitude: longitude,
       );
     } catch (e) {
-      debugPrint('[AuthProvider] saveLoginHistory error: $e');
+      AppLogger.info('AuthProvider', 'saveLoginHistory error: $e');
     }
   }
 
@@ -428,7 +429,7 @@ class AuthProvider extends ChangeNotifier {
       if (tier == StorageTier.free) return;
       await _supabase.registerSession();
     } catch (e) {
-      debugPrint('[AuthProvider] registerSession error: $e');
+      AppLogger.info('AuthProvider', 'registerSession error: $e');
     }
   }
 
@@ -442,7 +443,7 @@ class AuthProvider extends ChangeNotifier {
         if (tier == StorageTier.free) return;
         await _supabase.sendHeartbeat();
       } catch (e) {
-        debugPrint('[AuthProvider] heartbeat error: $e');
+        AppLogger.info('AuthProvider', 'heartbeat error: $e');
       }
     });
   }
@@ -481,7 +482,7 @@ class AuthProvider extends ChangeNotifier {
       final remote = teamId != null
           ? await _supabase.fetchTeamScans(teamId)
           : await _supabase.fetchOrders();
-      debugPrint('[AuthProvider] syncOnLogin: userId=$userId, teamId=$teamId, remoteOrders=${remote.length}');
+      AppLogger.info('AuthProvider', 'syncOnLogin: userId=$userId, teamId=$teamId, remoteOrders=${remote.length}');
       int synced = 0;
       for (final m in remote) {
         try {
@@ -490,13 +491,13 @@ class AuthProvider extends ChangeNotifier {
           if (id > 0) {
             synced++;
           } else {
-            debugPrint('[AuthProvider] syncOnLogin: insertScan ignored (duplicate?) resi=${o.resi}');
+            AppLogger.info('AuthProvider', 'syncOnLogin: insertScan ignored (duplicate?) resi=${o.resi}');
           }
         } catch (e) {
-          debugPrint('Sync row error: $e');
+          AppLogger.error('AuthProvider', 'Sync row error', exception: e);
         }
       }
-      debugPrint('[AuthProvider] syncOnLogin: synced=$synced scans');
+      AppLogger.info('AuthProvider', 'syncOnLogin: synced=$synced scans');
 
       // If in a team, update team_id for existing scans that don't have it yet
       if (teamId != null && userId != null) {
@@ -505,13 +506,13 @@ class AuthProvider extends ChangeNotifier {
         // (they're superseded by team scans already in local DB from sync above)
         final deleted = await _db.deleteOrphanPersonalScans(userId);
         if (deleted > 0) {
-          debugPrint('[AuthProvider] syncOnLogin: deleted $deleted orphan personal scans for team user');
+          AppLogger.info('AuthProvider', 'syncOnLogin: deleted $deleted orphan personal scans for team user');
         }
         // Admin: reassign scans from dissolved teams to current active team
         if (isAdmin) {
           final reassigned = await _supabase.reassignOrphanTeamScans(userId, teamId);
           if (reassigned > 0) {
-            debugPrint('[AuthProvider] syncOnLogin: reassigned $reassigned orphan scans to team $teamId');
+            AppLogger.info('AuthProvider', 'syncOnLogin: reassigned $reassigned orphan scans to team $teamId');
           }
         }
       }
@@ -537,7 +538,7 @@ class AuthProvider extends ChangeNotifier {
               oc['category_id'] as int,
             );
           } catch (e) {
-            debugPrint('Sync order-category error: $e');
+            AppLogger.error('AuthProvider', 'Sync order-category error', exception: e);
           }
         }
       }
@@ -548,7 +549,7 @@ class AuthProvider extends ChangeNotifier {
       }
       syncState = const AsyncState.data(null);
     } catch (e, stack) {
-      debugPrint('Sync error: $e');
+      AppLogger.error('AuthProvider', 'Sync error', exception: e);
       syncState = AsyncState.error(e.toString(), stackTrace: stack, retry: syncOnLogin);
     } finally {
       notifyListeners();
@@ -590,12 +591,12 @@ class AuthProvider extends ChangeNotifier {
           await _db.assignCategoryToOrder(localOrder.id!, localCat.id!);
           synced++;
         } catch (e) {
-          debugPrint('Sync team scan-category error: $e');
+          AppLogger.error('AuthProvider', 'Sync team scan-category error', exception: e);
         }
       }
-      debugPrint('[AuthProvider] _syncTeamScanCategories: synced=$synced');
+      AppLogger.info('AuthProvider', '_syncTeamScanCategories: synced=$synced');
     } catch (e) {
-      debugPrint('[AuthProvider] _syncTeamScanCategories error: $e');
+      AppLogger.info('AuthProvider', '_syncTeamScanCategories error: $e');
     }
   }
 
@@ -661,10 +662,10 @@ class AuthProvider extends ChangeNotifier {
         }
       }
       if (downloaded > 0) {
-        debugPrint('[AuthProvider] Synced $downloaded photos from cloud to local');
+        AppLogger.info('AuthProvider', 'Synced $downloaded photos from cloud to local');
       }
     } catch (e) {
-      debugPrint('[AuthProvider] Sync photos to local error: $e');
+      AppLogger.info('AuthProvider', 'Sync photos to local error: $e');
     }
   }
 }

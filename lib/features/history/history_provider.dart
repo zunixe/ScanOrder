@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../../core/logging/logger.dart';
 import 'package:intl/intl.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/state/async_state.dart';
@@ -56,23 +57,23 @@ class HistoryProvider extends ChangeNotifier {
     notifyListeners();
     try {
       if (_teamId != null) {
-        debugPrint('[History] loadDates TEAM mode: teamId=$_teamId');
+        AppLogger.info('History', 'loadDates TEAM mode: teamId=$_teamId');
         availableDates = await SupabaseService().getTeamDistinctDates(_teamId!);
-        debugPrint('[History] loadDates TEAM result: ${availableDates.length} dates = $availableDates');
+        AppLogger.info('History', 'loadDates TEAM result: ${availableDates.length} dates = $availableDates');
       } else {
-        debugPrint('[History] loadDates PERSONAL mode: userId=$_userId');
+        AppLogger.info('History', 'loadDates PERSONAL mode: userId=$_userId');
         availableDates = await _db.getDistinctDates(userId: _userId);
-        debugPrint('[History] loadDates PERSONAL result: ${availableDates.length} dates');
+        AppLogger.info('History', 'loadDates PERSONAL result: ${availableDates.length} dates');
       }
       // Auto-select first available date if today has no scans (but not if user chose "Semua")
       if (selectedDate != allDatesSentinel && availableDates.isNotEmpty && !availableDates.contains(selectedDate)) {
         selectedDate = availableDates.first;
-        debugPrint('[History] loadDates: auto-selected date=$selectedDate');
+        AppLogger.info('History', 'loadDates: auto-selected date=$selectedDate');
       }
       datesState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[History] loadDates error: $e');
+      AppLogger.info('History', 'loadDates error: $e');
       datesState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadDates);
       notifyListeners();
     }
@@ -84,7 +85,7 @@ class HistoryProvider extends ChangeNotifier {
     try {
       if (_teamId != null) {
         // Team mode: query Supabase
-        debugPrint('[History] loadScans TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
+        AppLogger.info('History', 'loadScans TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
         List<Map<String, dynamic>> raw;
         if (isSearching && searchQuery.isNotEmpty) {
           raw = await SupabaseService().searchTeamScans(_teamId!, searchQuery);
@@ -93,10 +94,10 @@ class HistoryProvider extends ChangeNotifier {
         } else {
           raw = await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
         }
-        debugPrint('[History] loadScans TEAM raw: ${raw.length} rows');
-        if (raw.isNotEmpty) debugPrint('[History] loadScans TEAM sample: ${raw.first}');
+        AppLogger.info('History', 'loadScans TEAM raw: ${raw.length} rows');
+        if (raw.isNotEmpty) AppLogger.info('History', 'loadScans TEAM sample: ${raw.first}');
         scans = raw.map((m) => ScanRecord.fromSupabase(m)).toList();
-        debugPrint('[History] loadScans TEAM parsed: ${scans.length} scans');
+        AppLogger.info('History', 'loadScans TEAM parsed: ${scans.length} scans');
       } else {
         // Personal mode: query local DB
         if (filterCategoryId != null) {
@@ -119,7 +120,7 @@ class HistoryProvider extends ChangeNotifier {
       scansState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[History] loadScans error: $e');
+      AppLogger.info('History', 'loadScans error: $e');
       scansState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadScans);
       notifyListeners();
     }
@@ -182,11 +183,11 @@ class HistoryProvider extends ChangeNotifier {
         categories = await _db.getAllCategories(userId: _userId);
         categoryCounts = await _db.getCategoryCounts(userId: _userId);
       }
-      debugPrint('[History] loadCategories: ${categories.length} cats, teamId=$_teamId, counts=$categoryCounts');
+      AppLogger.info('History', 'loadCategories: ${categories.length} cats, teamId=$_teamId, counts=$categoryCounts');
       categoriesLoadState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[History] loadCategories error: $e');
+      AppLogger.info('History', 'loadCategories error: $e');
       categoriesLoadState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadCategories);
       notifyListeners();
     }
@@ -268,7 +269,7 @@ class HistoryProvider extends ChangeNotifier {
           }
         }
       } catch (e) {
-        debugPrint('[History] updatePhoto remove from Supabase error: $e');
+        AppLogger.info('History', 'updatePhoto remove from Supabase error: $e');
       }
     }
     notifyListeners();
@@ -290,7 +291,7 @@ class HistoryProvider extends ChangeNotifier {
       return raw.map((m) => ScanRecord.fromSupabase(m)).toList();
     }
     final scans = await _db.getAllScans(userId: _userId);
-    debugPrint('[HistoryProvider] getAllForExport: userId=$_userId, scans=${scans.length}');
+    AppLogger.info('HistoryProvider', 'getAllForExport: userId=$_userId, scans=${scans.length}');
     // Attach categories to each order for export
     for (var i = 0; i < scans.length; i++) {
       if (scans[i].id != null) {

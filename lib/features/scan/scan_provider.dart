@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
+import '../../core/logging/logger.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../core/monitoring/analytics_service.dart';
+import '../../core/notifications/notification_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../services/marketplace_detector.dart';
@@ -100,7 +102,7 @@ class ScanProvider extends ChangeNotifier {
         scanLimit = await _quota.getScanLimit();
         remainingScans = await _quota.getRemainingFreeScans();
       }
-      debugPrint('[ScanProvider] loadCounts: userId=$userId, tier=$currentTier, scanLimit=$scanLimit, remaining=$remainingScans, todayCount=$todayCount, totalCount=$totalCount, teamId=$_teamId');
+      AppLogger.info('ScanProvider', 'loadCounts: userId=$userId, tier=$currentTier, scanLimit=$scanLimit, remaining=$remainingScans, todayCount=$todayCount, totalCount=$totalCount, teamId=$_teamId');
       // Load categories for Team tier or team member
       if (currentTier == StorageTier.unlimited || _teamId != null) {
         await loadCategories();
@@ -108,7 +110,7 @@ class ScanProvider extends ChangeNotifier {
       countsState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[ScanProvider] loadCounts error: $e');
+      AppLogger.info('ScanProvider', 'loadCounts error: $e');
       countsState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadCounts);
       notifyListeners();
     }
@@ -136,11 +138,11 @@ class ScanProvider extends ChangeNotifier {
         categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
         categoryCounts = await _db.getCategoryCounts(userId: userId);
       }
-      debugPrint('[ScanProvider] loadCategories: ${categories.length} cats, teamId=$_teamId, adminUserId=$_adminUserId');
+      AppLogger.info('ScanProvider', 'loadCategories: ${categories.length} cats, teamId=$_teamId, adminUserId=$_adminUserId');
       categoriesState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[ScanProvider] loadCategories error: $e');
+      AppLogger.info('ScanProvider', 'loadCategories error: $e');
       categoriesState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadCategories);
       notifyListeners();
     }
@@ -152,7 +154,7 @@ class ScanProvider extends ChangeNotifier {
     // Only pass adminUserId for team members (not admin themselves)
     final effectiveAdminId = (_adminUserId != null && _adminUserId != userId) ? _adminUserId : null;
     await SupabaseService().syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
-    debugPrint('[ScanProvider] _syncTeamCategoriesFromSupabase: synced own + admin cats');
+    AppLogger.info('ScanProvider', '_syncTeamCategoriesFromSupabase: synced own + admin cats');
   }
 
   void setActiveCategory(int? id) {
@@ -194,9 +196,9 @@ class ScanProvider extends ChangeNotifier {
               'color': color,
             });
           }
-          debugPrint('[ScanProvider] addCategory synced to Supabase: name=$name, uuid=$uuid');
+          AppLogger.info('ScanProvider', 'addCategory synced to Supabase: name=$name, uuid=$uuid');
         } catch (e) {
-          debugPrint('[ScanProvider] addCategory sync error: $e');
+          AppLogger.info('ScanProvider', 'addCategory sync error: $e');
         }
       }
     });
@@ -239,11 +241,11 @@ class ScanProvider extends ChangeNotifier {
       final resi = rawCode.trim();
       if (resi.isEmpty) return null;
 
-      debugPrint('[ScanProvider] processScan start: resi=$resi, teamId(arg)=$teamId, _teamId=$_teamId, tier=$currentTier, activeCategoryId=$activeCategoryId, localCategories=${categories.length}');
+      AppLogger.info('ScanProvider', 'processScan start: resi=$resi, teamId(arg)=$teamId, _teamId=$_teamId, tier=$currentTier, activeCategoryId=$activeCategoryId, localCategories=${categories.length}');
 
       // Team mode: wajib pilih kategori sebelum scan (selalu, agar tidak ada scan tanpa kategori)
       if ((_teamId != null || currentTier == StorageTier.unlimited) && activeCategoryId == null) {
-        debugPrint('[ScanProvider] blocked: no active category selected in team mode');
+        AppLogger.info('ScanProvider', 'blocked: no active category selected in team mode');
         lastResult = ScanResult(
           status: ScanStatus.noCategory,
           resi: resi,
@@ -365,7 +367,7 @@ class ScanProvider extends ChangeNotifier {
         }
         // Assign ke kategori aktif (UNIQUE order_id, category_id mencegah duplikat dalam kategori)
         final ocId = await _db.assignCategoryToOrder(orderId, activeCategoryId!);
-        debugPrint('[ScanProvider] assigned local category: ocId=$ocId, orderId=$orderId, categoryId=$activeCategoryId');
+        AppLogger.info('ScanProvider', 'assigned local category: ocId=$ocId, orderId=$orderId, categoryId=$activeCategoryId');
         // Sync category assignment to Supabase via queue (reliable, with retry)
         // Don't use Future.microtask — race condition with insertScan
       } else {
@@ -400,6 +402,10 @@ class ScanProvider extends ChangeNotifier {
         totalCount = await SupabaseService().getTeamTotalScans(_teamId!);
       } else {
         remainingScans = await _quota.getRemainingFreeScans();
+        // Notify when quota is low
+        if (remainingScans >= 0 && remainingScans <= 3) {
+          NotificationService().showQuotaWarning(remaining: remainingScans, limit: await _quota.getScanLimit());
+        }
       }
       notifyListeners();
 
@@ -429,14 +435,14 @@ class ScanProvider extends ChangeNotifier {
           'scanned_by': userId,
           'category_id': activeCategoryId,
         });
-        debugPrint('[ScanProvider] enqueued insertScan for resi=$resi, teamId=$teamId');
+        AppLogger.info('ScanProvider', 'enqueued insertScan for resi=$resi, teamId=$teamId');
         // Enqueue order-category relation after insertScan; processor will retry until scan exists
         if (activeCategoryId != null) {
           queue.enqueue(SyncTaskType.insertScanCategory, {
             'resi': resi,
             'category_id': activeCategoryId,
           });
-          debugPrint('[ScanProvider] enqueued insertScanCategory for resi=$resi, categoryId=$activeCategoryId');
+          AppLogger.info('ScanProvider', 'enqueued insertScanCategory for resi=$resi, categoryId=$activeCategoryId');
         }
         // Note: subscription sync is handled by consumeScan() → syncToCloud()
         // Do NOT enqueue syncSubscription here with placeholder data,
@@ -445,7 +451,7 @@ class ScanProvider extends ChangeNotifier {
 
       return lastResult;
     } catch (e, stack) {
-      debugPrint('[ScanProvider] processScan error: $e\n$stack');
+      AppLogger.info('ScanProvider', 'processScan error: $e\n$stack');
       _processing = false;
       scanState = AsyncState.error(e.toString(), stackTrace: stack, retry: () => processScan(rawCode, photoPath, teamId: teamId));
       notifyListeners();
@@ -504,7 +510,7 @@ class ScanProvider extends ChangeNotifier {
 
       return scRows.isNotEmpty;
     } catch (e) {
-      debugPrint('[ScanProvider] _checkTeamDuplicate error: $e');
+      AppLogger.info('ScanProvider', '_checkTeamDuplicate error: $e');
       return false;
     }
   }

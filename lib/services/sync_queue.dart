@@ -1,12 +1,13 @@
 import 'dart:convert';
+import '../core/logging/logger.dart';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../core/supabase/supabase_service.dart';
 import '../core/db/database_helper.dart';
 import '../core/monitoring/monitoring_service.dart';
 import '../core/monitoring/analytics_service.dart';
+import '../core/notifications/notification_service.dart';
 
 /// Task yang perlu di-sync ke Supabase
 enum SyncTaskType { insertScan, uploadPhoto, syncSubscription, insertScanCategory }
@@ -103,7 +104,7 @@ class SyncQueue {
     );
     final db = await _getQueueDb();
     await db.insert('sync_queue', _taskToDbMap(task));
-    debugPrint('[SyncQueue] Enqueued: ${type.name} (id=${task.id})');
+    AppLogger.info('SyncQueue', 'Enqueued: ${type.name} (id=${task.id})');
     _tryProcess();
   }
 
@@ -118,7 +119,7 @@ class SyncQueue {
       while (true) {
         // Rate limiting
         if (!_checkRateLimit()) {
-          debugPrint('[SyncQueue] Rate limit hit, pausing for 60s');
+          AppLogger.info('SyncQueue', 'Rate limit hit, pausing for 60s');
           await Future.delayed(const Duration(seconds: 60));
           _resetRateLimitWindow();
           continue;
@@ -175,16 +176,17 @@ class SyncQueue {
           break;
       }
     } catch (e) {
-      debugPrint('[SyncQueue] Task ${task.id} error: $e');
+      AppLogger.info('SyncQueue', 'Task ${task.id} error: $e');
       MonitoringService.reportError(e, context: 'sync_${task.type.name}', extra: {'task_id': task.id});
       AnalyticsService.syncError('${task.type.name}: $e');
+      NotificationService().showSyncError(error: '${task.type.name}: $e');
     }
 
     if (success) {
       final db = await _getQueueDb();
       await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
       _tasksProcessedInWindow++;
-      debugPrint('[SyncQueue] Task ${task.id} completed ✓');
+      AppLogger.info('SyncQueue', 'Task ${task.id} completed ✓');
     } else {
       _markRetry(task);
     }
@@ -220,7 +222,7 @@ class SyncQueue {
             : await client.from('scans').select('id').eq('user_id', userId ?? '').eq('resi', resi).limit(1);
         if ((existing as List).isNotEmpty) {
           await DatabaseHelper.instance.updateOrderSyncStatusByResi(resi, 'duplicate_conflict', userId: userId, teamId: teamId as String?);
-          debugPrint('[SyncQueue] insertScan: duplicate conflict detected for resi=$resi, teamId=$teamId');
+          AppLogger.info('SyncQueue', 'insertScan: duplicate conflict detected for resi=$resi, teamId=$teamId');
           return true;
         }
       }
@@ -242,7 +244,7 @@ class SyncQueue {
             if (localCat != null) {
               final ownerUserId = localCat.userId ?? SupabaseService().currentUser?.id;
               if (ownerUserId == null) {
-                debugPrint('[SyncQueue] insertScan: cannot resolve ownerUserId for category ${localCat.name}');
+                AppLogger.info('SyncQueue', 'insertScan: cannot resolve ownerUserId for category ${localCat.name}');
                 return true; // do not fail the whole task
               }
               final catRows = await client
@@ -254,21 +256,21 @@ class SyncQueue {
               final catList = List<Map<String, dynamic>>.from(catRows);
               if (catList.isNotEmpty) {
                 final catUuid = catList.first['id'];
-                debugPrint('[SyncQueue] insertScan: inserting scan_categories scan_id=$scanId, category_uuid=$catUuid (from local id=$categoryId)');
+                AppLogger.info('SyncQueue', 'insertScan: inserting scan_categories scan_id=$scanId, category_uuid=$catUuid (from local id=$categoryId)');
                 await client.from('scan_categories').upsert({
                   'scan_id': scanId,
                   'category_id': catUuid,
                 }, onConflict: 'scan_id,category_id');
-                debugPrint('[SyncQueue] insertScan: scan_categories inserted OK');
+                AppLogger.info('SyncQueue', 'insertScan: scan_categories inserted OK');
               } else {
-                debugPrint('[SyncQueue] insertScan: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
+                AppLogger.info('SyncQueue', 'insertScan: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
               }
             } else {
-              debugPrint('[SyncQueue] insertScan: local category not found id=$categoryId');
+              AppLogger.info('SyncQueue', 'insertScan: local category not found id=$categoryId');
             }
           }
         } catch (e2) {
-          debugPrint('[SyncQueue] insertScan: scan_categories error: $e2');
+          AppLogger.info('SyncQueue', 'insertScan: scan_categories error: $e2');
         }
       }
       return true;
@@ -277,10 +279,10 @@ class SyncQueue {
       final resi = p['resi'] as String?;
       if (resi != null && e.toString().contains('23505')) {
         await DatabaseHelper.instance.updateOrderSyncStatusByResi(resi, 'duplicate_conflict', userId: p['user_id'] as String?, teamId: p['team_id'] as String?);
-        debugPrint('[SyncQueue] insertScan: duplicate conflict from database for resi=$resi');
+        AppLogger.info('SyncQueue', 'insertScan: duplicate conflict from database for resi=$resi');
         return true;
       }
-      debugPrint('[SyncQueue] insertScan error: $e');
+      AppLogger.info('SyncQueue', 'insertScan error: $e');
       return false;
     }
   }
@@ -304,12 +306,12 @@ class SyncQueue {
         // Resolve Supabase category UUID by local category name + owner
         final localCat = await DatabaseHelper.instance.getCategoryById(categoryId as int);
         if (localCat == null) {
-          debugPrint('[SyncQueue] insertScanCategory: local category not found id=$categoryId');
+          AppLogger.info('SyncQueue', 'insertScanCategory: local category not found id=$categoryId');
           return false;
         }
         final ownerUserId = localCat.userId ?? SupabaseService().currentUser?.id;
         if (ownerUserId == null) {
-          debugPrint('[SyncQueue] insertScanCategory: cannot resolve ownerUserId for category ${localCat.name}');
+          AppLogger.info('SyncQueue', 'insertScanCategory: cannot resolve ownerUserId for category ${localCat.name}');
           return false;
         }
         final catRows = await client
@@ -319,7 +321,7 @@ class SyncQueue {
             .eq('name', localCat.name)
             .limit(1) as List<dynamic>;
         if (catRows.isEmpty) {
-          debugPrint('[SyncQueue] insertScanCategory: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
+          AppLogger.info('SyncQueue', 'insertScanCategory: Supabase category not found for name=${localCat.name}, owner=$ownerUserId');
           return false;
         }
         final catUuid = catRows.first['id'];
@@ -335,7 +337,7 @@ class SyncQueue {
       // Scan not found yet, retry later
       return false;
     } catch (e) {
-      debugPrint('[SyncQueue] insertScanCategory error: $e');
+      AppLogger.info('SyncQueue', 'insertScanCategory error: $e');
       return false;
     }
   }
@@ -344,14 +346,14 @@ class SyncQueue {
     final p = task.payload;
     final localPath = p['local_path'] as String?;
     if (localPath == null) {
-      debugPrint('[SyncQueue] uploadPhoto: local_path is null');
+      AppLogger.info('SyncQueue', 'uploadPhoto: local_path is null');
       return false;
     }
 
     final file = File(localPath);
     if (!file.existsSync()) {
       // File sudah dihapus, skip
-      debugPrint('[SyncQueue] uploadPhoto: file not found, skipping');
+      AppLogger.info('SyncQueue', 'uploadPhoto: file not found, skipping');
       final db = await _getQueueDb();
       await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
       return true;
@@ -362,15 +364,15 @@ class SyncQueue {
     final fileName = p['cloud_filename'] as String? ??
         '${userId ?? 'anon'}/${DateTime.now().millisecondsSinceEpoch}.jpg';
 
-    debugPrint('[SyncQueue] uploadPhoto: uploading file=$localPath, fileName=$fileName, resi=$resi');
+    AppLogger.info('SyncQueue', 'uploadPhoto: uploading file=$localPath, fileName=$fileName, resi=$resi');
 
     final url = await _supabase.uploadPhoto(file, fileName);
     if (url == null) {
-      debugPrint('[SyncQueue] uploadPhoto: upload failed, url is null');
+      AppLogger.info('SyncQueue', 'uploadPhoto: upload failed, url is null');
       return false;
     }
 
-    debugPrint('[SyncQueue] uploadPhoto: upload success, url=$url');
+    AppLogger.info('SyncQueue', 'uploadPhoto: upload success, url=$url');
     final client = _supabase.client;
     bool supabaseUpdated = false;
 
@@ -384,7 +386,7 @@ class SyncQueue {
             .limit(1);
 
         if ((existing as List).isEmpty) {
-          debugPrint('[SyncQueue] uploadPhoto: scan row not found for resi=$resi, re-enqueue insertScan with cloud URL');
+          AppLogger.info('SyncQueue', 'uploadPhoto: scan row not found for resi=$resi, re-enqueue insertScan with cloud URL');
           // Scan row doesn't exist — enqueue insertScan with the cloud URL
           await enqueue(SyncTaskType.insertScan, {
             'device_id': 'pending',
@@ -404,11 +406,11 @@ class SyncQueue {
               .from('scans')
               .update({'photo_url': url})
               .eq('resi', resi);
-          debugPrint('[SyncQueue] uploadPhoto: updated photo_url in Supabase for resi=$resi');
+          AppLogger.info('SyncQueue', 'uploadPhoto: updated photo_url in Supabase for resi=$resi');
           supabaseUpdated = true;
         }
       } catch (e) {
-        debugPrint('[SyncQueue] uploadPhoto: Supabase update error: $e');
+        AppLogger.info('SyncQueue', 'uploadPhoto: Supabase update error: $e');
         // CRITICAL: Don't update local DB if Supabase update failed
         // This prevents the stale mismatch where local has cloud URL but Supabase has local path
         return false;
@@ -424,7 +426,7 @@ class SyncQueue {
         for (final o in scans) {
           if (o.photoPath == localPath && o.id != null) {
             await dbHelper.updateScanPhoto(o.id!, url);
-            debugPrint('[SyncQueue] uploadPhoto: Updated local photo_path to cloud URL for resi=${o.resi}');
+            AppLogger.info('SyncQueue', 'uploadPhoto: Updated local photo_path to cloud URL for resi=${o.resi}');
             break;
           }
         }
@@ -433,12 +435,12 @@ class SyncQueue {
         for (final o in teamOrders) {
           if (o.photoPath == localPath && o.id != null) {
             await dbHelper.updateScanPhoto(o.id!, url);
-            debugPrint('[SyncQueue] uploadPhoto: Updated local team photo_path to cloud URL for resi=${o.resi}');
+            AppLogger.info('SyncQueue', 'uploadPhoto: Updated local team photo_path to cloud URL for resi=${o.resi}');
             break;
           }
         }
       } catch (e) {
-        debugPrint('[SyncQueue] uploadPhoto: Update local photo_path error: $e');
+        AppLogger.info('SyncQueue', 'uploadPhoto: Update local photo_path error: $e');
         // Non-critical: Supabase is already updated, local will catch up on next load
       }
     }
@@ -468,7 +470,7 @@ class SyncQueue {
       });
       return true;
     } catch (e) {
-      debugPrint('[SyncQueue] syncSubscription error: $e');
+      AppLogger.info('SyncQueue', 'syncSubscription error: $e');
       return false;
     }
   }
@@ -477,7 +479,7 @@ class SyncQueue {
   Future<void> _markRetry(SyncTask task) async {
     if (task.retryCount >= _maxRetries) {
       // Max retry, hapus task
-      debugPrint('[SyncQueue] Task ${task.id} max retries reached, dropping');
+      AppLogger.info('SyncQueue', 'Task ${task.id} max retries reached, dropping');
       final db = await _getQueueDb();
       await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
       return;
@@ -506,7 +508,7 @@ class SyncQueue {
       where: 'id = ?',
       whereArgs: [task.id],
     );
-    debugPrint('[SyncQueue] Task ${task.id} retry ${updated.retryCount}/$_maxRetries, next at $nextRetry');
+    AppLogger.info('SyncQueue', 'Task ${task.id} retry ${updated.retryCount}/$_maxRetries, next at $nextRetry');
   }
 
   /// Rate limiting check
@@ -528,7 +530,7 @@ class SyncQueue {
     final wasOffline = !_isOnline;
     _isOnline = online;
     if (wasOffline && online) {
-      debugPrint('[SyncQueue] Back online, processing queue...');
+      AppLogger.info('SyncQueue', 'Back online, processing queue...');
       _tryProcess();
     }
   }
@@ -537,7 +539,7 @@ class SyncQueue {
   Future<void> processPending() async {
     final count = await pendingCount;
     if (count > 0) {
-      debugPrint('[SyncQueue] Processing $count pending tasks on startup');
+      AppLogger.info('SyncQueue', 'Processing $count pending tasks on startup');
       await MonitoringService.measure('sync_queue_startup', 'process_pending', () async {
         _tryProcess();
       });

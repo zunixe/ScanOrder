@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../../core/logging/logger.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -85,11 +86,11 @@ class StatsProvider extends ChangeNotifier {
       await _loadSyncStats(userId: userId, teamId: teamId);
       await _loadCategorySyncStats(userId: userId, teamId: teamId);
       await _loadTeamStats();
-      debugPrint('[Stats] photoSizeBytes=$photoSizeBytes, cloudPhotoSizeBytes=$cloudPhotoSizeBytes, dbSizeBytes=$dbSizeBytes, cloudDbSizeBytes=$cloudDbSizeBytes');
+      AppLogger.info('Stats', 'photoSizeBytes=$photoSizeBytes, cloudPhotoSizeBytes=$cloudPhotoSizeBytes, dbSizeBytes=$dbSizeBytes, cloudDbSizeBytes=$cloudDbSizeBytes');
       statsState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[Stats] loadStats error: $e');
+      AppLogger.info('Stats', 'loadStats error: $e');
       statsState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadStats);
       notifyListeners();
     }
@@ -168,7 +169,7 @@ class StatsProvider extends ChangeNotifier {
         }
       }
     } catch (e) {
-      debugPrint('Storage stats error: $e');
+      AppLogger.error('Stats', 'Storage stats error', exception: e);
     }
   }
 
@@ -260,7 +261,7 @@ class StatsProvider extends ChangeNotifier {
           if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http') && resi != null) {
             unsyncedResis.add(resi);
             unsyncedPaths[resi] = photoUrl;
-            debugPrint('[Stats] unsynced photo: resi=$resi, photo_url=$photoUrl');
+            AppLogger.info('Stats', 'unsynced photo: resi=$resi, photo_url=$photoUrl');
           }
         }
         // Local team scans not synced to cloud at all
@@ -268,7 +269,7 @@ class StatsProvider extends ChangeNotifier {
           if (!cloudResiSet.contains(o.resi) && o.photoPath != null && o.photoPath!.isNotEmpty) {
             unsyncedResis.add(o.resi);
             unsyncedPaths[o.resi] = o.photoPath!;
-            debugPrint('[Stats] unsynced photo (local only): resi=${o.resi}, photoPath=${o.photoPath}');
+            AppLogger.info('Stats', 'unsynced photo (local only): resi=${o.resi}, photoPath=${o.photoPath}');
           }
         }
         unsyncedPhotoResis = unsyncedResis;
@@ -323,9 +324,9 @@ class StatsProvider extends ChangeNotifier {
       // Pending queue count
       pendingQueueCount = await _syncQueue.pendingCount;
 
-      debugPrint('[Stats] sync stats: total=$total, syncedScans=$syncedScans, unsyncedScans=$unsyncedScans, cloudPhotos=$cloudPhotos, localOnlyPhotos=$localOnlyPhotos, syncedPhotos=$syncedPhotos, unsyncedPhotos=$unsyncedPhotos, pendingQueue=$pendingQueueCount, teamId=$teamId');
+      AppLogger.info('Stats', 'sync stats: total=$total, syncedScans=$syncedScans, unsyncedScans=$unsyncedScans, cloudPhotos=$cloudPhotos, localOnlyPhotos=$localOnlyPhotos, syncedPhotos=$syncedPhotos, unsyncedPhotos=$unsyncedPhotos, pendingQueue=$pendingQueueCount, teamId=$teamId');
     } catch (e) {
-      debugPrint('Sync stats error: $e');
+      AppLogger.error('Stats', 'Sync stats error', exception: e);
     }
   }
 
@@ -379,9 +380,9 @@ class StatsProvider extends ChangeNotifier {
 
       syncedCategories = synced;
       unsyncedCategories = localCats.length - synced;
-      debugPrint('[Stats] category sync: total=${localCats.length}, synced=$synced, unsynced=${localCats.length - synced}, remoteKeys=$remoteCatKeys');
+      AppLogger.info('Stats', 'category sync: total=${localCats.length}, synced=$synced, unsynced=${localCats.length - synced}, remoteKeys=$remoteCatKeys');
     } catch (e) {
-      debugPrint('Category sync stats error: $e');
+      AppLogger.error('Stats', 'Category sync stats error', exception: e);
     }
   }
 
@@ -431,7 +432,7 @@ class StatsProvider extends ChangeNotifier {
 
       memberScanStats = memberScanMap;
     } catch (e) {
-      debugPrint('Team stats error: $e');
+      AppLogger.error('Stats', 'Team stats error', exception: e);
       memberScanStats = {};
       teamMembers = [];
     }

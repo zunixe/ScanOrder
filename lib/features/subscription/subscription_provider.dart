@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../../core/logging/logger.dart';
 import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../services/iap_service.dart';
@@ -82,7 +83,7 @@ class SubscriptionProvider extends ChangeNotifier {
       statusState = const AsyncState.data(null);
       notifyListeners();
     } catch (e, stack) {
-      debugPrint('[SubscriptionProvider] loadStatus error: $e');
+      AppLogger.info('SubscriptionProvider', 'loadStatus error: $e');
       statusState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadStatus);
       notifyListeners();
     }
@@ -92,11 +93,11 @@ class SubscriptionProvider extends ChangeNotifier {
     try {
       await initializeIap();
       if (iapAvailable) {
-        debugPrint('[SubscriptionProvider] Auto-restoring IAP purchases...');
+        AppLogger.info('SubscriptionProvider', 'Auto-restoring IAP purchases...');
         await _iap.restorePurchases();
       }
     } catch (e) {
-      debugPrint('[SubscriptionProvider] Auto-restore IAP error: $e');
+      AppLogger.info('SubscriptionProvider', 'Auto-restore IAP error: $e');
     }
   }
 

@@ -1,6 +1,6 @@
 import 'dart:async';
+import '../core/logging/logger.dart';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:in_app_purchase_android/billing_client_wrappers.dart';
@@ -31,7 +31,7 @@ class IapService {
 
     _subscription ??= _iap.purchaseStream.listen(
       (purchases) => _handlePurchaseUpdates(purchases, onPurchaseApplied: onPurchaseApplied),
-      onError: (Object error) => debugPrint('[IAP] purchase stream error: $error'),
+      onError: (Object error) => AppLogger.info('IAP', 'purchase stream error: $error'),
     );
 
     await loadProducts();
@@ -46,11 +46,11 @@ class IapService {
     });
 
     if (response.error != null) {
-      debugPrint('[IAP] query products error: ${response.error}');
+      AppLogger.info('IAP', 'query products error: ${response.error}');
     }
     _notFoundIds = response.notFoundIDs;
     if (_notFoundIds.isNotEmpty) {
-      debugPrint('[IAP] products not found: ${_notFoundIds.join(', ')}');
+      AppLogger.info('IAP', 'products not found: ${_notFoundIds.join(', ')}');
     }
     _products = response.productDetails;
   }
@@ -67,7 +67,7 @@ class IapService {
     final productId = productIdForTier(tier);
     final product = _products.where((p) => p.id == productId).firstOrNull;
     if (product == null) {
-      debugPrint('[IAP] product not found for tier $tier ($productId)');
+      AppLogger.info('IAP', 'product not found for tier $tier ($productId)');
       return false;
     }
 
@@ -76,7 +76,7 @@ class IapService {
     if (Platform.isAndroid) {
       final existingPurchase = _findExistingSubscriptionPurchase(tier);
       if (existingPurchase != null) {
-        debugPrint('[IAP] Upgrading from ${existingPurchase.productID} to $productId');
+        AppLogger.info('IAP', 'Upgrading from ${existingPurchase.productID} to $productId');
         purchaseParam = GooglePlayPurchaseParam(
           productDetails: product,
           changeSubscriptionParam: ChangeSubscriptionParam(
@@ -112,7 +112,7 @@ class IapService {
       }
 
       if (purchase.status == PurchaseStatus.error) {
-        debugPrint('[IAP] purchase error: ${purchase.error}');
+        AppLogger.info('IAP', 'purchase error: ${purchase.error}');
       }
 
       if (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) {

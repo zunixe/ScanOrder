@@ -453,6 +453,9 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
               ],
 
               const SizedBox(height: 24),
+
+              // FAQ Section
+              _FaqSection(),
             ],
           ),
         ),
@@ -774,4 +777,106 @@ class _UpgradeOption {
     required this.price,
     required this.scans,
   });
+}
+
+class _FaqSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Pertanyaan Umum',
+          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        _FaqItem(
+          question: 'Apa itu ScanOrder?',
+          answer: 'ScanOrder adalah aplikasi pencatatan resi/paket otomatis. Cukup scan barcode resi, data langsung tersimpan lengkap dengan foto, kategori, dan sinkronisasi ke cloud.',
+        ),
+        _FaqItem(
+          question: 'Apa perbedaan paket Gratis, Basic, Pro, dan Team?',
+          answer: '• Gratis: 10 scan/hari, tanpa foto\n• Basic: 50 scan/hari + foto + cloud sync\n• Pro: 200 scan/hari + foto + cloud sync + prioritas\n• Team: Unlimited scan + kolaborasi tim + kategori bersama',
+        ),
+        _FaqItem(
+          question: 'Bagaimana cara kerja cloud sync?',
+          answer: 'Data scan disimpan lokal di HP dan otomatis dikirim ke Supabase cloud saat online. Jika offline, data masuk antrian dan akan sync saat koneksi kembali tersedia.',
+        ),
+        _FaqItem(
+          question: 'Apakah data saya aman?',
+          answer: 'Ya. Data tersimpan di Supabase dengan enkripsi. Foto disimpan di private storage bucket. Hanya Anda (dan anggota tim untuk mode Team) yang bisa mengakses.',
+        ),
+        _FaqItem(
+          question: 'Bagaimana cara bergabung dengan tim?',
+          answer: 'Minta kode invite dari admin tim, lalu masuk ke Pengaturan → Gabung Tim. Minimal langganan Basic diperlukan untuk bergabung.',
+        ),
+        _FaqItem(
+          question: 'Apa yang terjadi jika kuota habis?',
+          answer: 'Scan baru akan ditolak sampai kuota direset (esok hari) atau upgrade paket. Data yang sudah tersimpan tetap bisa dilihat dan diekspor.',
+        ),
+        _FaqItem(
+          question: 'Bisa refund?',
+          answer: 'Pembelian melalui Google Play Store mengikuti kebijakan refund Google. Hubungi kami di pengaturan jika ada masalah.',
+        ),
+        _FaqItem(
+          question: 'Bagaimana cara backup data?',
+          answer: 'Masuk ke Pengaturan → Ekspor Data. Data bisa diekspor ke file CSV untuk backup. Data juga otomatis tersimpan di cloud jika berlangganan.',
+        ),
+      ],
+    );
+  }
+}
+
+class _FaqItem extends StatefulWidget {
+  final String question;
+  final String answer;
+  const _FaqItem({required this.question, required this.answer});
+
+  @override
+  State<_FaqItem> createState() => _FaqItemState();
+}
+
+class _FaqItemState extends State<_FaqItem> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.question,
+                      style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    color: theme.colorScheme.primary,
+                  ),
+                ],
+              ),
+              if (_expanded) ...[
+                const SizedBox(height: 8),
+                Text(
+                  widget.answer,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

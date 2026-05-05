@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/logging/logger.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../core/theme.dart';
@@ -67,7 +68,7 @@ class _ContactPageState extends State<ContactPage> {
         _emailController.clear();
         _messageController.clear();
       } else {
-        debugPrint('[Contact] Error ${response.statusCode}: ${response.body}');
+        AppLogger.info('Contact', 'Error ${response.statusCode}: ${response.body}');
         final errorMsg = error ??
             (response.statusCode == 404
                 ? 'Layanan kontak belum aktif.'

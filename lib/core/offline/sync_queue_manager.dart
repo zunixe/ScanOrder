@@ -1,6 +1,6 @@
 import 'dart:async';
+import '../logging/logger.dart';
 
-import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'sync_queue_item.dart';
@@ -114,7 +114,7 @@ class SyncQueueManager {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
 
-    debugPrint('Added to sync queue: $itemId (${operationType.name})');
+    AppLogger.info('SyncQueueManager', 'Added to sync queue: $itemId (${operationType.name})');
     
     // Trigger sync if not already syncing
     if (!_isSyncing) {
@@ -151,7 +151,7 @@ class SyncQueueManager {
   /// Process the sync queue
   Future<void> processQueue() async {
     if (_isSyncing) {
-      debugPrint('Sync already in progress, skipping...');
+      AppLogger.info('SyncQueueManager', 'Sync already in progress, skipping...');
       return;
     }
 
@@ -167,11 +167,11 @@ class SyncQueueManager {
       
       if (allItems.isEmpty) {
         _status = SyncQueueStatus.idle;
-        debugPrint('Sync queue is empty');
+        AppLogger.info('SyncQueueManager', 'Sync queue is empty');
         return;
       }
 
-      debugPrint('Processing ${allItems.length} items from sync queue');
+      AppLogger.info('SyncQueueManager', 'Processing ${allItems.length} items from sync queue');
 
       int successCount = 0;
       int failureCount = 0;
@@ -218,8 +218,8 @@ class SyncQueueManager {
         }
       }
 
-      debugPrint(
-        'Sync completed: $successCount succeeded, $failureCount failed, $conflictCount conflicts'
+      AppLogger.info(
+        'SyncQueueManager', 'Sync completed: $successCount succeeded, $failureCount failed, $conflictCount conflicts'
       );
 
       // Check if there are still pending items
@@ -232,7 +232,7 @@ class SyncQueueManager {
           : SyncQueueStatus.idle;
 
     } catch (e) {
-      debugPrint('Sync queue processing error: $e');
+      AppLogger.info('SyncQueueManager', 'Sync queue processing error: $e');
       _status = SyncQueueStatus.error;
     } finally {
       _isSyncing = false;
@@ -317,7 +317,7 @@ class SyncQueueManager {
         errorMessage: 'Max retries exceeded: ${error.toString()}',
         retryCount: newRetryCount,
       );
-      debugPrint('Item ${item.id} permanently failed after ${newRetryCount} attempts');
+      AppLogger.info('SyncQueueManager', 'Item ${item.id} permanently failed after ${newRetryCount} attempts');
       return;
     }
 
@@ -331,9 +331,8 @@ class SyncQueueManager {
       lastAttemptAt: DateTime.now(),
     );
 
-    debugPrint(
-      'Item ${item.id} failed (attempt ${newRetryCount}), '
-      'will retry in ${nextDelay.inSeconds}s'
+    AppLogger.info(
+      'SyncQueueManager', 'Item ${item.id} failed (attempt ${newRetryCount}), will retry in ${nextDelay.inSeconds}s'
     );
   }
 
@@ -342,7 +341,7 @@ class SyncQueueManager {
     SyncQueueItem item,
     ConflictRequiresManualResolutionException exception,
   ) async {
-    debugPrint('Conflict detected for ${item.tableName}.${item.recordId}');
+    AppLogger.info('SyncQueueManager', 'Conflict detected for ${item.tableName}.${item.recordId}');
 
     // Update item status to conflict
     await _updateItemStatus(
@@ -430,7 +429,7 @@ class SyncQueueManager {
       whereArgs: [itemId],
     );
 
-    debugPrint('Conflict resolved for $itemId, using ${useLocalVersion ? "local" : "server"} version');
+    AppLogger.info('SyncQueueManager', 'Conflict resolved for $itemId, using ${useLocalVersion ? "local" : "server"} version');
 
     // Trigger sync to process the resolved item
     _triggerSync();
@@ -443,7 +442,7 @@ class SyncQueueManager {
       runZonedGuarded(() async {
         await processQueue();
       }, (error, stackTrace) {
-        debugPrint('Error in sync trigger: $error');
+        AppLogger.info('SyncQueueManager', 'Error in sync trigger: $error');
       });
     }
   }
@@ -456,14 +455,14 @@ class SyncQueueManager {
       _triggerSync();
     });
     
-    debugPrint('Auto-sync started with interval: $interval');
+    AppLogger.info('SyncQueueManager', 'Auto-sync started with interval: $interval');
   }
 
   /// Stop auto-sync timer
   void stopAutoSync() {
     _autoSyncTimer?.cancel();
     _autoSyncTimer = null;
-    debugPrint('Auto-sync stopped');
+    AppLogger.info('SyncQueueManager', 'Auto-sync stopped');
   }
 
   /// Get current queue statistics
@@ -501,7 +500,7 @@ class SyncQueueManager {
       where: 'status = ?',
       whereArgs: [SyncStatus.completed.index],
     );
-    debugPrint('Cleared completed items from sync queue');
+    AppLogger.info('SyncQueueManager', 'Cleared completed items from sync queue');
   }
 
   /// Dispose resources

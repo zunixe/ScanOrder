@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/logging/logger.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -671,7 +672,7 @@ class _OrderTileState extends State<_OrderTile> {
         return file.path;
       }
     } catch (e) {
-      debugPrint('[History] downloadAndCache error: $e');
+      AppLogger.error('History', 'downloadAndCache error', exception: e);
     }
     return null;
   }

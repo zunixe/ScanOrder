@@ -5,6 +5,7 @@ import 'core/theme.dart';
 import 'core/supabase/supabase_service.dart';
 import 'core/l10n/app_localizations.dart';
 import 'core/monitoring/monitoring_service.dart';
+import 'core/logging/logger.dart';
 import 'features/scan/scan_page.dart';
 import 'features/scan/scan_provider.dart';
 import 'features/history/history_page.dart';
@@ -169,7 +170,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final isAdmin = auth.isAdmin;
     final teamId = team?.id;
     final adminUserId = isAdmin ? null : team?.createdBy;
-    debugPrint('[App] _syncUserId: userId=$userId, teamId=$teamId, isAdmin=$isAdmin, adminUserId=$adminUserId');
+    AppLogger.info('App', '_syncUserId: userId=$userId, teamId=$teamId, isAdmin=$isAdmin, adminUserId=$adminUserId');
     // Set user context for crash reports
     MonitoringService.setUser(id: userId);
     context.read<HistoryProvider>().setUserId(userId);

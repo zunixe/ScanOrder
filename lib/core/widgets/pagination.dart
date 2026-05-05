@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../logging/logger.dart';
 
 /// Paginated list view for large datasets
 class PaginatedListView<T> extends StatefulWidget {
@@ -89,7 +90,7 @@ class _PaginatedListViewState<T> extends State<PaginatedListView<T>> {
         _isLoading = false;
       });
       // Handle error silently or show snackbar
-      debugPrint('Error loading items: $e');
+      AppLogger.error('Pagination', 'Error loading items', exception: e);
     }
   }
 

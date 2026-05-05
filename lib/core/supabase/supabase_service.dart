@@ -1,11 +1,11 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../models/team.dart';
 import '../db/database_helper.dart';
+import '../logging/logger.dart';
 
 /// Service untuk sinkronisasi data ke Supabase backend.
 ///
@@ -34,14 +34,14 @@ class SupabaseService {
 
   Future<void> initialize() async {
     if (!_isConfigured) {
-      debugPrint('[Supabase] URL/key masih placeholder — skip');
+      AppLogger.info('Supabase', 'URL/key masih placeholder — skip');
       _isOffline = true;
       return;
     }
     // Cek network reachability dulu supaya tidak crash di HP dengan network bermasalah
     final reachable = await _checkReachability();
     if (!reachable) {
-      debugPrint('[Supabase] Host tidak bisa di-reach — mode offline aktif');
+      AppLogger.info('Supabase', 'Host tidak bisa di-reach — mode offline aktif');
       _isOffline = true;
       return;
     }
@@ -51,9 +51,9 @@ class SupabaseService {
         anonKey: _supabaseKey,
       );
       _isOffline = false;
-      debugPrint('[Supabase] Initialized successfully');
+      AppLogger.info('Supabase', 'Initialized successfully');
     } catch (e) {
-      debugPrint('[Supabase] Init error: $e');
+      AppLogger.info('Supabase', 'Init error: $e');
       _isOffline = true;
     }
   }
@@ -85,7 +85,7 @@ class SupabaseService {
       await client.storage.from('scan-photos').upload(fileName, file);
       return client.storage.from('scan-photos').getPublicUrl(fileName);
     } catch (e) {
-      debugPrint('[Supabase] uploadPhoto error: $e');
+      AppLogger.info('Supabase', 'uploadPhoto error: $e');
       return null;
     }
   }
@@ -99,7 +99,7 @@ class SupabaseService {
       await file.writeAsBytes(response);
       return localPath;
     } catch (e) {
-      debugPrint('[Supabase] Download photo error: $e');
+      AppLogger.info('Supabase', 'Download photo error: $e');
       return null;
     }
   }
@@ -108,12 +108,12 @@ class SupabaseService {
   Future<void> insertScan(ScanRecord order, {String? deviceId}) async {
     final client = _client;
     if (client == null) {
-      debugPrint('[Supabase] Client not initialized');
+      AppLogger.info('Supabase', 'Client not initialized');
       return;
     }
     final user = currentUser;
     try {
-      debugPrint('[Supabase] Inserting order: ${order.resi}');
+      AppLogger.info('Supabase', 'Inserting order: ${order.resi}');
       await client.from('scans').insert({
         'device_id': deviceId ?? 'unknown',
         'user_id': user?.id,
@@ -123,10 +123,10 @@ class SupabaseService {
         'date': order.date,
         'photo_url': order.photoPath,
       });
-      debugPrint('[Supabase] Insert success: ${order.resi}');
+      AppLogger.info('Supabase', 'Insert success: ${order.resi}');
     } catch (e, st) {
-      debugPrint('[Supabase] Insert error: $e');
-      debugPrint('[Supabase] Stack: $st');
+      AppLogger.info('Supabase', 'Insert error: $e');
+      AppLogger.info('Supabase', 'Stack: $st');
     }
   }
 
@@ -135,16 +135,16 @@ class SupabaseService {
     final client = _client;
     if (client == null) return;
     try {
-      debugPrint('[Supabase] Deleting order: $resi');
+      AppLogger.info('Supabase', 'Deleting order: $resi');
       await client
           .from('scans')
           .delete()
           .eq('resi', resi)
           .eq('device_id', deviceId ?? 'unknown');
-      debugPrint('[Supabase] Delete success: $resi');
+      AppLogger.info('Supabase', 'Delete success: $resi');
     } catch (e, st) {
-      debugPrint('[Supabase] Delete error: $e');
-      debugPrint('[Supabase] Stack: $st');
+      AppLogger.info('Supabase', 'Delete error: $e');
+      AppLogger.info('Supabase', 'Stack: $st');
     }
   }
 
@@ -162,7 +162,7 @@ class SupabaseService {
           .order('scanned_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] fetch scans error: $e');
+      AppLogger.info('Supabase', 'fetch scans error: $e');
       return [];
     }
   }
@@ -179,7 +179,7 @@ class SupabaseService {
       );
       return true;
     } catch (e) {
-      debugPrint('[Supabase] Google OAuth error: $e');
+      AppLogger.info('Supabase', 'Google OAuth error: $e');
       return false;
     }
   }
@@ -197,16 +197,16 @@ class SupabaseService {
     final hasGoogleIdentity = user.identities?.any((id) => id.provider == 'google') ?? false;
     if (hasGoogleIdentity) return; // sudah ter-link
 
-    debugPrint('[Supabase] User ${user.email} tidak punya Google identity, mencoba manual link...');
+    AppLogger.info('Supabase', 'User ${user.email} tidak punya Google identity, mencoba manual link...');
 
     // Cari user lain dengan email yang sama yang punya Google identity
     try {
       // Ini perlu admin key atau server function, tapi untuk sekarang kita skip
       // Karena Supabase tidak menyediakan API public untuk ini
       // Solusi: gunakan server-side function atau enable automatic linking di dashboard
-      debugPrint('[Supabase] Manual identity linking memerlukan server function');
+      AppLogger.info('Supabase', 'Manual identity linking memerlukan server function');
     } catch (e) {
-      debugPrint('[Supabase] Link identity error: $e');
+      AppLogger.info('Supabase', 'Link identity error: $e');
     }
   }
 
@@ -217,7 +217,7 @@ class SupabaseService {
     try {
       await client.auth.signOut();
     } catch (e) {
-      debugPrint('[Supabase] Sign out error: $e');
+      AppLogger.info('Supabase', 'Sign out error: $e');
     }
   }
 
@@ -254,11 +254,11 @@ class SupabaseService {
         'role': 'admin',
         'email': user.email,
       });
-      debugPrint('[Supabase] Team created: ${team.id}');
+      AppLogger.info('Supabase', 'Team created: ${team.id}');
       return team;
     } catch (e, st) {
-      debugPrint('[Supabase] Create team error: $e');
-      debugPrint('[Supabase] Stack: $st');
+      AppLogger.info('Supabase', 'Create team error: $e');
+      AppLogger.info('Supabase', 'Stack: $st');
       return null;
     }
   }
@@ -273,7 +273,7 @@ class SupabaseService {
       if (response == null || (response as List).isEmpty) return null;
       return Team.fromMap(Map<String, dynamic>.from(response.first));
     } catch (e) {
-      debugPrint('[Supabase] Get team by invite error: $e');
+      AppLogger.info('Supabase', 'Get team by invite error: $e');
       return null;
     }
   }
@@ -301,7 +301,7 @@ class SupabaseService {
           .select('id')
           .eq('team_id', team.id);
       if (members.length >= 10) {
-        debugPrint('[Supabase] Team already has 10 members, cannot join');
+        AppLogger.info('Supabase', 'Team already has 10 members, cannot join');
         return false;
       }
       await client.from('team_members').insert({
@@ -310,11 +310,11 @@ class SupabaseService {
         'role': 'member',
         'email': user.email,
       });
-      debugPrint('[Supabase] Joined team: ${team.id}');
+      AppLogger.info('Supabase', 'Joined team: ${team.id}');
       return true;
     } catch (e, st) {
-      debugPrint('[Supabase] Join team error: $e');
-      debugPrint('[Supabase] Stack: $st');
+      AppLogger.info('Supabase', 'Join team error: $e');
+      AppLogger.info('Supabase', 'Stack: $st');
       return false;
     }
   }
@@ -332,7 +332,7 @@ class SupabaseService {
           .eq('user_id', user.id);
       return true;
     } catch (e) {
-      debugPrint('[Supabase] Leave team error: $e');
+      AppLogger.info('Supabase', 'Leave team error: $e');
       return false;
     }
   }
@@ -362,7 +362,7 @@ class SupabaseService {
           .eq('user_id', user.id);
       return true;
     } catch (e) {
-      debugPrint('[Supabase] Transfer admin error: $e');
+      AppLogger.info('Supabase', 'Transfer admin error: $e');
       return false;
     }
   }
@@ -391,7 +391,7 @@ class SupabaseService {
       
       return true;
     } catch (e) {
-      debugPrint('[Supabase] Dissolve team error: $e');
+      AppLogger.info('Supabase', 'Dissolve team error: $e');
       return false;
     }
   }
@@ -432,10 +432,10 @@ class SupabaseService {
       for (final id in orphanIds) {
         await client.from('scans').update({'team_id': activeTeamId}).eq('id', id);
       }
-      debugPrint('[Supabase] Reassigned ${orphanIds.length} orphan scans to team $activeTeamId');
+      AppLogger.info('Supabase', 'Reassigned ${orphanIds.length} orphan scans to team $activeTeamId');
       return orphanIds.length;
     } catch (e) {
-      debugPrint('[Supabase] Reassign orphan scans error: $e');
+      AppLogger.info('Supabase', 'Reassign orphan scans error: $e');
       return 0;
     }
   }
@@ -461,7 +461,7 @@ class SupabaseService {
           .single();
       return Team.fromMap(response);
     } catch (e) {
-      debugPrint('[Supabase] Get my team error: $e');
+      AppLogger.info('Supabase', 'Get my team error: $e');
       return null;
     }
   }
@@ -486,12 +486,12 @@ class SupabaseService {
   Future<void> insertScanWithTeam(ScanRecord order, {String? deviceId, String? teamId}) async {
     final client = _client;
     if (client == null) {
-      debugPrint('[Supabase] Client not initialized');
+      AppLogger.info('Supabase', 'Client not initialized');
       return;
     }
     final user = currentUser;
     try {
-      debugPrint('[Supabase] Inserting order: ${order.resi}');
+      AppLogger.info('Supabase', 'Inserting order: ${order.resi}');
       final data = {
         'device_id': deviceId ?? 'unknown',
         'resi': order.resi,
@@ -503,10 +503,10 @@ class SupabaseService {
       };
       if (teamId != null) data['team_id'] = teamId;
       await client.from('scans').insert(data);
-      debugPrint('[Supabase] Insert success: ${order.resi}');
+      AppLogger.info('Supabase', 'Insert success: ${order.resi}');
     } catch (e, st) {
-      debugPrint('[Supabase] Insert error: $e');
-      debugPrint('[Supabase] Stack: $st');
+      AppLogger.info('Supabase', 'Insert error: $e');
+      AppLogger.info('Supabase', 'Stack: $st');
     }
   }
 
@@ -528,24 +528,24 @@ class SupabaseService {
   /// Get distinct dates that have team scans (for history date chips)
   Future<List<String>> getTeamDistinctDates(String teamId) async {
     final client = _client;
-    if (client == null) { debugPrint('[Supabase] getTeamDistinctDates: no client'); return []; }
+    if (client == null) { AppLogger.info('Supabase', 'getTeamDistinctDates: no client'); return []; }
     try {
       final response = await client
           .from('scans')
           .select('date')
           .eq('team_id', teamId)
           .order('date', ascending: false);
-      debugPrint('[Supabase] getTeamDistinctDates: teamId=$teamId, raw=${(response as List).length} rows');
+      AppLogger.info('Supabase', 'getTeamDistinctDates: teamId=$teamId, raw=${(response as List).length} rows');
       final seen = <String>{};
       final dates = <String>[];
       for (final row in response as List) {
         final date = row['date'] as String;
         if (seen.add(date)) dates.add(date);
       }
-      debugPrint('[Supabase] getTeamDistinctDates: result=$dates');
+      AppLogger.info('Supabase', 'getTeamDistinctDates: result=$dates');
       return dates;
     } catch (e) {
-      debugPrint('[Supabase] getTeamDistinctDates error: $e');
+      AppLogger.info('Supabase', 'getTeamDistinctDates error: $e');
       return [];
     }
   }
@@ -553,7 +553,7 @@ class SupabaseService {
   /// Get team scans by date from Supabase
   Future<List<Map<String, dynamic>>> getTeamScansByDate(String teamId, String date) async {
     final client = _client;
-    if (client == null) { debugPrint('[Supabase] getTeamScansByDate: no client'); return []; }
+    if (client == null) { AppLogger.info('Supabase', 'getTeamScansByDate: no client'); return []; }
     try {
       final response = await client
           .from('scans')
@@ -561,11 +561,11 @@ class SupabaseService {
           .eq('team_id', teamId)
           .eq('date', date)
           .order('scanned_at', ascending: false);
-      debugPrint('[Supabase] getTeamScansByDate: teamId=$teamId, date=$date, rows=${(response as List).length}');
-      if ((response as List).isNotEmpty) debugPrint('[Supabase] getTeamScansByDate sample: ${response.first}');
+      AppLogger.info('Supabase', 'getTeamScansByDate: teamId=$teamId, date=$date, rows=${(response as List).length}');
+      if ((response as List).isNotEmpty) AppLogger.info('Supabase', 'getTeamScansByDate sample: ${response.first}');
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] getTeamScansByDate error: $e');
+      AppLogger.info('Supabase', 'getTeamScansByDate error: $e');
       return [];
     }
   }
@@ -584,7 +584,7 @@ class SupabaseService {
           .limit(100);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] searchTeamScans error: $e');
+      AppLogger.info('Supabase', 'searchTeamScans error: $e');
       return [];
     }
   }
@@ -592,17 +592,17 @@ class SupabaseService {
   /// Get total scan count for a team from Supabase
   Future<int> getTeamTotalScans(String teamId) async {
     final client = _client;
-    if (client == null) { debugPrint('[Supabase] getTeamTotalScans: no client'); return 0; }
+    if (client == null) { AppLogger.info('Supabase', 'getTeamTotalScans: no client'); return 0; }
     try {
       final response = await client
           .from('scans')
           .select('id')
           .eq('team_id', teamId);
       final count = (response as List).length;
-      debugPrint('[Supabase] getTeamTotalScans: teamId=$teamId, count=$count');
+      AppLogger.info('Supabase', 'getTeamTotalScans: teamId=$teamId, count=$count');
       return count;
     } catch (e) {
-      debugPrint('[Supabase] getTeamTotalScans error: $e');
+      AppLogger.info('Supabase', 'getTeamTotalScans error: $e');
       return 0;
     }
   }
@@ -610,7 +610,7 @@ class SupabaseService {
   /// Get scan count today for a team from Supabase
   Future<int> getTeamTodayScans(String teamId) async {
     final client = _client;
-    if (client == null) { debugPrint('[Supabase] getTeamTodayScans: no client'); return 0; }
+    if (client == null) { AppLogger.info('Supabase', 'getTeamTodayScans: no client'); return 0; }
     try {
       final today = DateTime.now();
       final dateStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
@@ -620,10 +620,10 @@ class SupabaseService {
           .eq('team_id', teamId)
           .eq('date', dateStr);
       final count = (response as List).length;
-      debugPrint('[Supabase] getTeamTodayScans: teamId=$teamId, date=$dateStr, count=$count');
+      AppLogger.info('Supabase', 'getTeamTodayScans: teamId=$teamId, date=$dateStr, count=$count');
       return count;
     } catch (e) {
-      debugPrint('[Supabase] getTeamTodayScans error: $e');
+      AppLogger.info('Supabase', 'getTeamTodayScans error: $e');
       return 0;
     }
   }
@@ -648,7 +648,7 @@ class SupabaseService {
       }
       return stats;
     } catch (e) {
-      debugPrint('[Supabase] getTeamDailyStats error: $e');
+      AppLogger.info('Supabase', 'getTeamDailyStats error: $e');
       return {};
     }
   }
@@ -671,7 +671,7 @@ class SupabaseService {
       final sorted = Map.fromEntries(stats.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
       return sorted;
     } catch (e) {
-      debugPrint('[Supabase] getTeamMarketplaceStats error: $e');
+      AppLogger.info('Supabase', 'getTeamMarketplaceStats error: $e');
       return {};
     }
   }
@@ -693,7 +693,7 @@ class SupabaseService {
       }
       return stats;
     } catch (e) {
-      debugPrint('[Supabase] getTeamCategoryStats error: $e');
+      AppLogger.info('Supabase', 'getTeamCategoryStats error: $e');
       return {};
     }
   }
@@ -706,7 +706,7 @@ class SupabaseService {
     try {
       final localRows = await DatabaseHelper.instance.getAllScanCategoriesWithResi();
       if (localRows.isEmpty) {
-        debugPrint('[Supabase] repairScanCategories: no local scan_categories to repair');
+        AppLogger.info('Supabase', 'repairScanCategories: no local scan_categories to repair');
         return;
       }
       int synced = 0;
@@ -739,11 +739,11 @@ class SupabaseService {
         }, onConflict: 'scan_id,category_id');
         synced++;
       }
-      debugPrint('[Supabase] repairScanCategories: synced=$synced, skipped=$skipped, total=${localRows.length}');
+      AppLogger.info('Supabase', 'repairScanCategories: synced=$synced, skipped=$skipped, total=${localRows.length}');
       // Cleanup duplicate scan_categories rows
       await _dedupScanCategories();
     } catch (e) {
-      debugPrint('[Supabase] repairScanCategories error: $e');
+      AppLogger.info('Supabase', 'repairScanCategories error: $e');
     }
   }
 
@@ -767,10 +767,10 @@ class SupabaseService {
       }
       if (duplicateIds.isNotEmpty) {
         await client.from('scan_categories').delete().inFilter('id', duplicateIds);
-        debugPrint('[Supabase] _dedupScanCategories: removed ${duplicateIds.length} duplicate rows');
+        AppLogger.info('Supabase', '_dedupScanCategories: removed ${duplicateIds.length} duplicate rows');
       }
     } catch (e) {
-      debugPrint('[Supabase] _dedupScanCategories error: $e');
+      AppLogger.info('Supabase', '_dedupScanCategories error: $e');
     }
   }
 
@@ -788,7 +788,7 @@ class SupabaseService {
       if (res == null) return null;
       return Map<String, dynamic>.from(res);
     } catch (e) {
-      debugPrint('[Supabase] fetch subscription error: $e');
+      AppLogger.info('Supabase', 'fetch subscription error: $e');
       return null;
     }
   }
@@ -804,7 +804,7 @@ class SupabaseService {
       if (response == null || (response as List).isEmpty) return null;
       return Map<String, dynamic>.from(response.first);
     } catch (e) {
-      debugPrint('[Supabase] fetch subscription by email error: $e');
+      AppLogger.info('Supabase', 'fetch subscription by email error: $e');
       return null;
     }
   }
@@ -822,7 +822,7 @@ class SupabaseService {
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      debugPrint('[Supabase] upsert subscription error: $e');
+      AppLogger.info('Supabase', 'upsert subscription error: $e');
     }
   }
 
@@ -867,10 +867,10 @@ class SupabaseService {
         'device_id': deviceId,
         'last_heartbeat': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'user_id');
-      debugPrint('[Supabase] Session registered: userId=${user.id}, deviceId=$deviceId');
+      AppLogger.info('Supabase', 'Session registered: userId=${user.id}, deviceId=$deviceId');
       return true;
     } catch (e) {
-      debugPrint('[Supabase] registerSession error: $e');
+      AppLogger.info('Supabase', 'registerSession error: $e');
       return false;
     }
   }
@@ -893,12 +893,12 @@ class SupabaseService {
       if (response == null) return true; // no session record — valid
       final activeDeviceId = response['device_id'] as String;
       if (activeDeviceId != deviceId) {
-        debugPrint('[Supabase] Session hijacked: active=$activeDeviceId, this=$deviceId');
+        AppLogger.info('Supabase', 'Session hijacked: active=$activeDeviceId, this=$deviceId');
         return false; // another device took over
       }
       return true;
     } catch (e) {
-      debugPrint('[Supabase] isSessionValid error: $e');
+      AppLogger.info('Supabase', 'isSessionValid error: $e');
       return true; // on error, assume valid to avoid disruptive logout
     }
   }
@@ -918,7 +918,7 @@ class SupabaseService {
         'last_heartbeat': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'user_id');
     } catch (e) {
-      debugPrint('[Supabase] sendHeartbeat error: $e');
+      AppLogger.info('Supabase', 'sendHeartbeat error: $e');
     }
   }
 
@@ -930,9 +930,9 @@ class SupabaseService {
     if (user == null) return;
     try {
       await client.from('user_sessions').delete().eq('user_id', user.id);
-      debugPrint('[Supabase] Session cleared for userId=${user.id}');
+      AppLogger.info('Supabase', 'Session cleared for userId=${user.id}');
     } catch (e) {
-      debugPrint('[Supabase] clearSession error: $e');
+      AppLogger.info('Supabase', 'clearSession error: $e');
     }
   }
 
@@ -963,9 +963,9 @@ class SupabaseService {
         'country': country,
         'login_at': DateTime.now().toUtc().toIso8601String(),
       });
-      debugPrint('[Supabase] Login history saved: lat=$latitude, lng=$longitude, city=$city');
+      AppLogger.info('Supabase', 'Login history saved: lat=$latitude, lng=$longitude, city=$city');
     } catch (e) {
-      debugPrint('[Supabase] insertLoginHistory error: $e');
+      AppLogger.info('Supabase', 'insertLoginHistory error: $e');
     }
   }
 
@@ -982,7 +982,7 @@ class SupabaseService {
           .limit(50);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('[Supabase] fetchLoginHistory error: $e');
+      AppLogger.info('Supabase', 'fetchLoginHistory error: $e');
       return [];
     }
   }
@@ -1011,7 +1011,7 @@ class SupabaseService {
         'color': color,
       });
     } catch (e) {
-      debugPrint('[Supabase] upsert category error: $e');
+      AppLogger.info('Supabase', 'upsert category error: $e');
     }
   }
 
@@ -1021,7 +1021,7 @@ class SupabaseService {
     try {
       await client.from('categories').delete().eq('id', categoryId);
     } catch (e) {
-      debugPrint('[Supabase] delete category error: $e');
+      AppLogger.info('Supabase', 'delete category error: $e');
     }
   }
 
@@ -1038,7 +1038,7 @@ class SupabaseService {
           .order('created_at');
       return List<Map<String, dynamic>>.from(res);
     } catch (e) {
-      debugPrint('[Supabase] fetch categories error: $e');
+      AppLogger.info('Supabase', 'fetch categories error: $e');
       return [];
     }
   }
@@ -1060,10 +1060,10 @@ class SupabaseService {
       }
       // Fallback: try fetching via RPC or alternative approach
       // If RLS blocks, the result will be empty - log warning
-      debugPrint('[Supabase] fetchTeamCategories: no results for adminUserId=$adminUserId (RLS may block)');
+      AppLogger.info('Supabase', 'fetchTeamCategories: no results for adminUserId=$adminUserId (RLS may block)');
       return [];
     } catch (e) {
-      debugPrint('[Supabase] fetch team categories error: $e');
+      AppLogger.info('Supabase', 'fetch team categories error: $e');
       return [];
     }
   }
@@ -1105,14 +1105,14 @@ class SupabaseService {
       // Find the Supabase scan_id by looking up the local order's resi
       final order = await DatabaseHelper.instance.getScanById(localOrderId);
       if (order == null) {
-        debugPrint('[Supabase] assignOrderCategory: local order $localOrderId not found');
+        AppLogger.info('Supabase', 'assignOrderCategory: local order $localOrderId not found');
         return;
       }
       final resi = order.resi;
       final rows = await client.from('scans').select('id').eq('resi', resi).limit(1);
       final rowList = List<Map<String, dynamic>>.from(rows);
       if (rowList.isEmpty) {
-        debugPrint('[Supabase] assignOrderCategory: scan not found in Supabase for resi=$resi');
+        AppLogger.info('Supabase', 'assignOrderCategory: scan not found in Supabase for resi=$resi');
         return;
       }
       final supabaseScanId = rowList.first['id'] as int;
@@ -1120,9 +1120,9 @@ class SupabaseService {
         'scan_id': supabaseScanId,
         'category_id': categoryId,
       }, onConflict: 'scan_id,category_id');
-      debugPrint('[Supabase] assignOrderCategory OK: resi=$resi, supabaseScanId=$supabaseScanId, categoryId=$categoryId');
+      AppLogger.info('Supabase', 'assignOrderCategory OK: resi=$resi, supabaseScanId=$supabaseScanId, categoryId=$categoryId');
     } catch (e) {
-      debugPrint('[Supabase] assign order category error: $e');
+      AppLogger.info('Supabase', 'assign order category error: $e');
     }
   }
 
@@ -1145,7 +1145,7 @@ class SupabaseService {
           .inFilter('category_id', catIds);
       return List<Map<String, dynamic>>.from(res);
     } catch (e) {
-      debugPrint('[Supabase] fetch order categories error: $e');
+      AppLogger.info('Supabase', 'fetch order categories error: $e');
       return [];
     }
   }
@@ -1161,7 +1161,7 @@ class SupabaseService {
           .order('sort_order', ascending: true);
       return List<Map<String, dynamic>>.from(res);
     } catch (e) {
-      debugPrint('[Supabase] fetch packages error: $e');
+      AppLogger.info('Supabase', 'fetch packages error: $e');
       return [];
     }
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/logging/logger.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -6,7 +7,9 @@ import 'package:package_info_plus/package_info_plus.dart' as pinfo;
 import '../../core/theme.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/backup/backup_service.dart';
 import '../../services/quota_service.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../services/sync_queue.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
@@ -816,10 +819,10 @@ class _SyncSection extends StatelessWidget {
                       }
                     }
                   } catch (e) {
-                    debugPrint('[Settings] Fix Supabase photo_url error: $e');
+                    AppLogger.info('Settings', 'Fix Supabase photo_url error: $e');
                   }
                   if (reEnqueued > 0) {
-                    debugPrint('[Settings] Re-enqueued $reEnqueued photos for upload');
+                    AppLogger.info('Settings', 'Re-enqueued $reEnqueued photos for upload');
                   }
                 }
                 await syncQueue.processPending();
@@ -861,7 +864,77 @@ class _SyncSection extends StatelessWidget {
             },
           ),
           const Divider(height: 32),
-          // Debug: Clear all data
+          // Backup & Restore
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const Icon(Icons.backup_outlined),
+            title: const Text('Backup ke File', style: _settingsTitleStyle),
+            subtitle: const Text('Ekspor semua data ke file JSON untuk cadangan', style: _settingsSubtitleStyle),
+            onTap: () async {
+              try {
+                final userId = SupabaseService().currentUser?.id;
+                await BackupService().backupAndShare(userId);
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Gagal backup: $e')),
+                  );
+                }
+              }
+            },
+          ),
+          ListTile(
+            dense: true,
+            contentPadding: _settingsTilePadding,
+            leading: const Icon(Icons.restore_outlined),
+            title: const Text('Restore dari File', style: _settingsTitleStyle),
+            subtitle: const Text('Impor data dari file backup JSON', style: _settingsSubtitleStyle),
+            onTap: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Restore Data?'),
+                  content: const Text('Data dari file backup akan ditambahkan ke data yang sudah ada. Data duplikat akan dilewati.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restore')),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+              try {
+                final result = await FilePicker.platform.pickFiles(
+                  type: FileType.custom,
+                  allowedExtensions: ['json'],
+                );
+                if (result == null || result.files.isEmpty) return;
+                final filePath = result.files.single.path;
+                if (filePath == null) return;
+                final counts = await BackupService().restoreFromFile(filePath);
+                // Refresh providers
+                if (context.mounted) {
+                  context.read<HistoryProvider>().refresh();
+                  context.read<ScanProvider>().loadCounts();
+                  context.read<StatsProvider>().loadStats();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Restore berhasil: ${counts['scans']} scan, ${counts['categories']} kategori'),
+                      duration: const Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Gagal restore: $e')),
+                  );
+                }
+              }
+            },
+          ),
+          const Divider(height: 32),
           ListTile(
             dense: true,
             contentPadding: _settingsTilePadding,
@@ -908,10 +981,10 @@ class _SyncSection extends StatelessWidget {
                     if (files.isNotEmpty) {
                       final filePaths = files.map((f) => '$userId/${f.name}').toList();
                       await storage.remove(filePaths);
-                      debugPrint('[Settings] Deleted ${filePaths.length} photos from storage for user $userId');
+                      AppLogger.info('Settings', 'Deleted ${filePaths.length} photos from storage for user $userId');
                     }
                   } catch (e) {
-                    debugPrint('[Settings] Failed to delete storage photos: $e');
+                    AppLogger.info('Settings', 'Failed to delete storage photos: $e');
                   }
                   
                   await client.from('user_subscriptions').update({'cycle_used': 0}).eq('user_id', userId);

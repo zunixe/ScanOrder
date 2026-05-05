@@ -4,6 +4,7 @@ import 'app.dart';
 import 'core/supabase/supabase_service.dart';
 import 'core/monitoring/monitoring_service.dart';
 import 'core/monitoring/analytics_service.dart';
+import 'core/notifications/notification_service.dart';
 import 'services/sync_queue.dart';
 
 void main() async {
@@ -14,6 +15,9 @@ void main() async {
 
   await initializeDateFormatting('id_ID', null);
   await SupabaseService().initialize();
+
+  // Initialize local notifications
+  await NotificationService().init();
 
   // Track app open
   await AnalyticsService.appOpen();

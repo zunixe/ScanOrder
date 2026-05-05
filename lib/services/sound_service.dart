@@ -1,5 +1,5 @@
 import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
+import '../core/logging/logger.dart';
 
 /// Sound effect service for scan feedback
 class SoundService {
@@ -15,7 +15,7 @@ class SoundService {
       await _player.stop();
       await _player.play(AssetSource('sounds/scan_success.mp3'));
     } catch (e) {
-      debugPrint('[SoundService] playScanSuccess error: $e');
+      AppLogger.info('SoundService', 'playScanSuccess error: $e');
     }
   }
 
@@ -25,7 +25,7 @@ class SoundService {
       await _player.stop();
       await _player.play(AssetSource('sounds/scan_duplicate.mp3'));
     } catch (e) {
-      debugPrint('[SoundService] playScanDuplicate error: $e');
+      AppLogger.info('SoundService', 'playScanDuplicate error: $e');
     }
   }
 
