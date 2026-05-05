@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common/sqflite.dart' show databaseFactoryOrNull, openDatabase, inMemoryDatabasePath, Database;
 import 'package:scanorder/core/db/migrations/migration.dart';
 import 'package:scanorder/core/db/migrations/migration_registry.dart';
 import 'package:scanorder/core/db/migrations/migration_v5.dart';
@@ -9,7 +9,7 @@ import 'package:scanorder/core/db/migrations/migration_v9.dart';
 void main() {
   setUpAll(() {
     sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+    databaseFactoryOrNull = databaseFactoryFfi;
   });
 
   group('MigrationRegistry', () {

@@ -1,7 +1,8 @@
 import 'dart:convert';
 import '../core/logging/logger.dart';
 import 'dart:io';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
+import '../core/security/secure_storage_service.dart';
 import 'package:path/path.dart' as p;
 import '../core/supabase/supabase_service.dart';
 import '../core/db/database_helper.dart';
@@ -546,13 +547,15 @@ class SyncQueue {
     }
   }
 
-  /// Get/create the queue database
+  /// Get/create the queue database (encrypted)
   Future<Database> _getQueueDb() async {
     final dbPath = await getDatabasesPath();
     final path = p.join(dbPath, 'sync_queue.db');
+    final password = await SecureStorageService.getDbEncryptionKey() ?? '';
     return openDatabase(
       path,
       version: 1,
+      password: password,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sync_queue (

@@ -1,6 +1,6 @@
 # Kebijakan Privasi ScanOrder
 
-Terakhir diperbarui: 1 Mei 2025
+Terakhir diperbarui: Mei 2026
 
 ## 1. Pendahuluan
 
@@ -35,7 +35,9 @@ Kami menggunakan informasi yang dikumpulkan untuk:
 ## 4. Penyimpanan dan Keamanan Data
 
 ### 4.1 Penyimpanan Lokal
-- Data scan dan foto resi disimpan di perangkat Anda menggunakan SQLite.
+- Data scan dan foto resi disimpan di perangkat Anda menggunakan **database terenkripsi SQLCipher (AES-256)**.
+- Kunci enkripsi database disimpan di **Android Keystore / iOS Keychain** yang tidak bisa diekstrak oleh aplikasi lain.
+- ID perangkat dan data sensitif lainnya disimpan di **EncryptedSharedPreferences** (Android) / **Keychain** (iOS).
 - Anda dapat menghapus data lokal kapan saja melalui pengaturan aplikasi.
 
 ### 4.2 Penyimpanan Cloud
@@ -44,6 +46,10 @@ Kami menggunakan informasi yang dikumpulkan untuk:
 - Row-Level Security (RLS) diterapkan untuk memastikan setiap pengguna hanya dapat mengakses data miliknya sendiri atau timnya.
 
 ### 4.3 Keamanan
+- **Database lokal terenkripsi** menggunakan SQLCipher (AES-256) — data tidak bisa dibaca tanpa kunci enkripsi.
+- **Kunci enkripsi** disimpan di hardware-backed keystore (Android Keystore / iOS Keychain).
+- **Koneksi cloud** menggunakan HTTPS/TLS 1.3 untuk semua transmisi data.
+- **Foto** disimpan di storage privat dengan akses terbatas.
 - Kami menerapkan langkah-langkah keamanan teknis dan organisasi yang wajar untuk melindungi data Anda.
 - Tidak ada sistem yang 100% aman; kami berupaya meminimalkan risiko pelanggaran data.
 

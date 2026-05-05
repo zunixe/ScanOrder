@@ -1,13 +1,16 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common/sqflite.dart' show databaseFactoryOrNull;
 import 'package:scanorder/core/db/database_helper.dart';
 import 'package:scanorder/models/scan_record.dart';
 import 'package:scanorder/models/category.dart';
 
 void main() {
   setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
     sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+    databaseFactoryOrNull = databaseFactoryFfi;
+    DatabaseHelper.setTestMode(true);
   });
 
   group('DatabaseHelper', () {

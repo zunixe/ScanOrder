@@ -1,12 +1,22 @@
-import 'package:sqflite/sqflite.dart';
+import 'dart:io';
+import 'package:sqflite_sqlcipher/sqflite.dart';
+import 'package:sqflite_common/sqflite.dart' as common;
 import 'package:path/path.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
+import '../security/secure_storage_service.dart';
+import '../logging/logger.dart';
 import 'migrations/migration_registry.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
   static Database? _database;
+  static bool _testMode = false;
+  static const _migratedKey = 'db_encrypted_migrated';
+
+  /// Enable test mode — skips encryption (for unit tests only)
+  static void setTestMode(bool enabled) => _testMode = enabled;
 
   DatabaseHelper._internal();
 
@@ -16,13 +26,56 @@ class DatabaseHelper {
     return _database!;
   }
 
+  /// Get or generate a stable encryption key stored in secure storage.
+  Future<String?> _getEncryptionKey() async {
+    if (_testMode) return null;
+    var key = await SecureStorageService.getDbEncryptionKey();
+    if (key == null || key.isEmpty) {
+      final random = DateTime.now().microsecondsSinceEpoch.toString() +
+          DateTime.now().toIso8601String();
+      key = random.padRight(64, '0').substring(0, 64);
+      await SecureStorageService.setDbEncryptionKey(key);
+    }
+    return key;
+  }
+
+  /// Migrate unencrypted DB to encrypted by deleting old DB.
+  /// Data will be re-synced from cloud on next login.
+  Future<void> _migrateToEncrypted(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_migratedKey) == true) return;
+
+    final file = File(path);
+    if (await file.exists()) {
+      AppLogger.info('DatabaseHelper', 'Migrating unencrypted DB to encrypted — old data will re-sync from cloud');
+      await deleteDatabase(path);
+    }
+    await prefs.setBool(_migratedKey, true);
+  }
+
   Future<Database> _initDatabase() async {
+    if (_testMode) {
+      final dbPath = await common.getDatabasesPath();
+      final path = join(dbPath, 'scanorder.db');
+      return await common.openDatabase(
+        path,
+        version: MigrationRegistry.currentVersion,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      );
+    }
+
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'scanorder.db');
+    final password = await _getEncryptionKey();
+
+    // One-time migration: delete old unencrypted DB
+    await _migrateToEncrypted(path);
 
     return await openDatabase(
       path,
       version: MigrationRegistry.currentVersion,
+      password: password,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );

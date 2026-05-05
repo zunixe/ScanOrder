@@ -1,11 +1,11 @@
 import 'dart:io';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../models/team.dart';
 import '../db/database_helper.dart';
 import '../logging/logger.dart';
+import '../security/secure_storage_service.dart';
 
 /// Service untuk sinkronisasi data ke Supabase backend.
 ///
@@ -839,14 +839,13 @@ class SupabaseService {
 
   // ── Single-device session management ──
 
-  /// Get or create a stable device ID for this device
+  /// Get or create a stable device ID for this device (stored securely)
   Future<String> getDeviceId() async {
-    final prefs = await SharedPreferences.getInstance();
-    var deviceId = prefs.getString('device_id');
+    var deviceId = await SecureStorageService.getDeviceId();
     if (deviceId == null) {
-      // Generate a unique device ID and persist it
+      // Generate a unique device ID and persist it securely
       deviceId = 'dev_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
-      await prefs.setString('device_id', deviceId);
+      await SecureStorageService.setDeviceId(deviceId);
     }
     return deviceId;
   }
