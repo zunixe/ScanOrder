@@ -139,6 +139,8 @@ class ConflictResolutionDialog extends StatefulWidget {
   final DateTime localUpdatedAt;
   final DateTime serverUpdatedAt;
 
+  final void Function(String itemId, bool useLocal)? onResolveConflict;
+
   const ConflictResolutionDialog({
     super.key,
     required this.itemId,
@@ -148,6 +150,7 @@ class ConflictResolutionDialog extends StatefulWidget {
     required this.serverData,
     required this.localUpdatedAt,
     required this.serverUpdatedAt,
+    this.onResolveConflict,
   });
 
   @override

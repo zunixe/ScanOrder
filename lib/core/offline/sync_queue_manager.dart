@@ -95,7 +95,7 @@ class SyncQueueManager {
     required Map<String, dynamic> payload,
     int? localVersion,
   }) async {
-    final itemId = '${tableName}_$recordId_${DateTime.now().millisecondsSinceEpoch}';
+    final itemId = '${tableName}_${recordId}_${DateTime.now().millisecondsSinceEpoch}';
     
     final item = SyncQueueItem(
       id: itemId,

@@ -126,8 +126,7 @@ class RetryPolicy {
     // If non-retryable exceptions are specified, check those first
     if (nonRetryableExceptions.isNotEmpty) {
       for (final type in nonRetryableExceptions) {
-        if (exception.runtimeType == type || 
-            (exception is Object && type.isInstance(exception))) {
+        if (exception.runtimeType == type) {
           return false;
         }
       }
@@ -136,8 +135,7 @@ class RetryPolicy {
     // If retryable exceptions are specified, only retry those
     if (retryableExceptions.isNotEmpty) {
       for (final type in retryableExceptions) {
-        if (exception.runtimeType == type || 
-            (exception is Object && type.isInstance(exception))) {
+        if (exception.runtimeType == type) {
           return true;
         }
       }

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 
 /// Accessibility utility extensions and helpers
 extension AccessibilityExtensions on Widget {
@@ -179,7 +181,7 @@ class LargeTouchTarget extends StatelessWidget {
 /// Screen reader announcement utility
 class AccessibilityAnnouncement {
   static void announce(BuildContext context, String message, {bool assertive = false}) {
-    SemanticsService.announce(message, Directionality.of(context), assertive: assertive);
+    SemanticsService.announce(message, TextDirection.ltr);
   }
 
   static void announceError(BuildContext context, String message) {
@@ -220,8 +222,8 @@ class _FocusTrapState extends State<FocusTrap> {
     return FocusScope(
       node: _focusScopeNode,
       child: Shortcuts(
-        shortcuts: <LogicalKeySet, Intent>{
-          LogicalKeySet(LogicalKeyboardKey.escape): const ActivateIntent(),
+        shortcuts: <ShortcutActivator, Intent>{
+          const SingleActivator(LogicalKeyboardKey.escape): const ActivateIntent(),
         },
         child: Actions(
           actions: <Type, Action<Intent>>{
