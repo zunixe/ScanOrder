@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
+import 'migrations/migration_registry.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -21,7 +22,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: MigrationRegistry.currentVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -70,103 +71,9 @@ class DatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await db.execute('ALTER TABLE scans ADD COLUMN photo_path TEXT');
-    }
-    if (oldVersion < 3) {
-      await db.execute('ALTER TABLE scans ADD COLUMN user_id TEXT');
-      await db.execute('CREATE INDEX idx_user_id ON scans(user_id)');
-    }
-    if (oldVersion < 4) {
-      await db.execute('''
-        CREATE TABLE categories (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          color TEXT NOT NULL,
-          user_id TEXT,
-          created_at INTEGER NOT NULL
-        )
-      ''');
-      await db.execute('CREATE INDEX idx_categories_user ON categories(user_id)');
-      await db.execute('''
-        CREATE TABLE order_categories (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          order_id INTEGER NOT NULL,
-          category_id INTEGER NOT NULL,
-          assigned_at INTEGER NOT NULL,
-          UNIQUE(order_id, category_id)
-        )
-      ''');
-      await db.execute('CREATE INDEX idx_oc_order ON order_categories(order_id)');
-      await db.execute('CREATE INDEX idx_oc_category ON order_categories(category_id)');
-    }
-    if (oldVersion < 5) {
-      // Recreate scans table with UNIQUE(resi, user_id) instead of UNIQUE(resi)
-      // Handle partial migration from previous crash: drop orders_old if it exists
-      try { await db.execute('DROP TABLE IF EXISTS orders_old'); } catch (_) {}
-      await db.execute('ALTER TABLE scans RENAME TO orders_old');
-      await db.execute('''
-        CREATE TABLE scans (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          resi TEXT NOT NULL,
-          marketplace TEXT NOT NULL,
-          scanned_at INTEGER NOT NULL,
-          date TEXT NOT NULL,
-          photo_path TEXT,
-          user_id TEXT
-        )
-      ''');
-      await db.execute('CREATE UNIQUE INDEX idx_resi_user ON scans(resi, user_id)');
-      await db.execute('CREATE INDEX idx_date ON scans(date)');
-      await db.execute('CREATE INDEX idx_marketplace ON scans(marketplace)');
-      await db.execute('CREATE INDEX idx_user_id ON scans(user_id)');
-      // Copy data: keep latest row per (resi, user_id) to resolve old global UNIQUE(resi) conflicts
-      await db.execute('''
-        INSERT INTO scans (resi, marketplace, scanned_at, date, photo_path, user_id)
-        SELECT resi, marketplace, scanned_at, date, photo_path, user_id
-        FROM orders_old
-        WHERE id IN (
-          SELECT MAX(id) FROM orders_old GROUP BY resi, COALESCE(user_id, '')
-        )
-      ''');
-      await db.execute('DROP TABLE orders_old');
-    }
-    if (oldVersion < 6) {
-      // Rename scans → scans, order_categories → scan_categories
-      // Also rename column order_id → scan_id in scan_categories
-      await db.execute('ALTER TABLE scans RENAME TO scans');
-      await db.execute('ALTER TABLE order_categories RENAME TO scan_categories');
-      // SQLite doesn't support ALTER COLUMN, so recreate scan_categories with scan_id
-      try { await db.execute('DROP TABLE IF EXISTS scan_categories_old'); } catch (_) {}
-      await db.execute('ALTER TABLE scan_categories RENAME TO scan_categories_old');
-      await db.execute('''
-        CREATE TABLE scan_categories (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          scan_id INTEGER NOT NULL,
-          category_id INTEGER NOT NULL,
-          assigned_at INTEGER NOT NULL,
-          UNIQUE(scan_id, category_id)
-        )
-      ''');
-      await db.execute('CREATE INDEX idx_sc_order ON scan_categories(scan_id)');
-      await db.execute('CREATE INDEX idx_sc_category ON scan_categories(category_id)');
-      await db.execute('''
-        INSERT INTO scan_categories (id, scan_id, category_id, assigned_at)
-        SELECT id, order_id, category_id, assigned_at FROM scan_categories_old
-      ''');
-      await db.execute('DROP TABLE scan_categories_old');
-    }
-    if (oldVersion < 7) {
-      // Add team_id column to scans for team data filtering
-      await db.execute('ALTER TABLE scans ADD COLUMN team_id TEXT');
-      await db.execute('CREATE INDEX idx_team_id ON scans(team_id)');
-    }
-    if (oldVersion < 8) {
-      // Add scanned_by column to track who actually scanned (differs from user_id for team members)
-      await db.execute('ALTER TABLE scans ADD COLUMN scanned_by TEXT');
-    }
-    if (oldVersion < 9) {
-      await db.execute("ALTER TABLE scans ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'synced'");
+    final migrations = MigrationRegistry.getMigrationsFor(oldVersion, newVersion);
+    for (final migration in migrations) {
+      await migration.up(db);
     }
   }
 
