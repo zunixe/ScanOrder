@@ -88,6 +88,9 @@ class MarketplaceDetector {
     // Tolak angka murni pendek (< 8 digit, bukan resi)
     if (RegExp(r'^\d{1,7}$').hasMatch(trimmed)) return false;
 
+    // Tolak angka murni panjang (>= 15 digit, Order ID)
+    if (RegExp(r'^\d{15,}$').hasMatch(trimmed)) return false;
+
     // Terima jika cocok pattern resi yang dikenal
     final marketplace = detect(trimmed);
     if (marketplace != 'Lainnya') return true;
