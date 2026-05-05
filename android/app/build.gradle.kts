@@ -25,7 +25,7 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17"
     }
 
     defaultConfig {
@@ -34,18 +34,13 @@ android {
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-
-        // Split per ABI — generates separate APK for each CPU architecture
-        // Reduces APK size significantly (e.g. arm64-v8a only ~60% of fat APK)
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
-        }
     }
 
-    // Generate separate APKs per ABI instead of a single fat APK
+    // Generate separate APKs per ABI instead of a single fat APK (release only)
+    // Debug builds use Flutter's ndk.abiFilters which conflicts with splits
     splits {
         abi {
-            isEnable = true
+            isEnable = project.hasProperty("split-apk")
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86_64")
             isUniversalApk = false
@@ -58,7 +53,7 @@ android {
     androidComponents {
         onVariants { variant ->
             variant.outputs.forEach { output ->
-                val abi = output.filters.find { it.filterType == "ABI" }?.identifier
+                val abi = output.filters.find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }?.identifier
                 val baseCode = flutter.versionCode.toInt()
                 val abiCode = abiCodes[abi] ?: 0
                 output.versionCode.set(baseCode * 10 + abiCode)
