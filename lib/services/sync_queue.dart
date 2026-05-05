@@ -5,6 +5,8 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../core/supabase/supabase_service.dart';
 import '../core/db/database_helper.dart';
+import '../core/monitoring/monitoring_service.dart';
+import '../core/monitoring/analytics_service.dart';
 
 /// Task yang perlu di-sync ke Supabase
 enum SyncTaskType { insertScan, uploadPhoto, syncSubscription, insertScanCategory }
@@ -174,6 +176,8 @@ class SyncQueue {
       }
     } catch (e) {
       debugPrint('[SyncQueue] Task ${task.id} error: $e');
+      MonitoringService.reportError(e, context: 'sync_${task.type.name}', extra: {'task_id': task.id});
+      AnalyticsService.syncError('${task.type.name}: $e');
     }
 
     if (success) {
@@ -534,7 +538,9 @@ class SyncQueue {
     final count = await pendingCount;
     if (count > 0) {
       debugPrint('[SyncQueue] Processing $count pending tasks on startup');
-      _tryProcess();
+      await MonitoringService.measure('sync_queue_startup', 'process_pending', () async {
+        _tryProcess();
+      });
     }
   }
 

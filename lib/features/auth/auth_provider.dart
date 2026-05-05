@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
+import '../../core/monitoring/analytics_service.dart';
+import '../../core/monitoring/monitoring_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/team.dart';
 import '../../services/quota_service.dart';
@@ -120,6 +122,7 @@ class AuthProvider extends ChangeNotifier {
       final team = await _supabase.createTeam(name);
       if (team != null) {
         _currentTeam = team;
+        AnalyticsService.teamCreate();
       } else {
         _error = 'Gagal membuat team';
       }
@@ -151,6 +154,7 @@ class AuthProvider extends ChangeNotifier {
         await _loadTeam();
         // Sync team data (scans + admin categories) to local
         await syncOnLogin();
+        AnalyticsService.teamJoin();
       } else {
         _error = 'Kode invite tidak valid';
       }
@@ -256,6 +260,7 @@ class AuthProvider extends ChangeNotifier {
         email: email,
         password: password,
       );
+      AnalyticsService.login('email_signup');
       _isLoggedIn = true;
       // Apply tier yang dipilih saat daftar
       if (tier != StorageTier.free) {
@@ -264,6 +269,7 @@ class AuthProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = 'Signup gagal: $e';
+      MonitoringService.reportError(e, context: 'signUp');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -289,12 +295,14 @@ class AuthProvider extends ChangeNotifier {
         email: email,
         password: password,
       );
+      AnalyticsService.login('email_signin');
       _isLoggedIn = true;
       // Register session after successful login
       await _registerSessionIfNeeded();
       _startHeartbeat();
     } catch (e) {
       _error = 'Login gagal: $e';
+      MonitoringService.reportError(e, context: 'signIn');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -309,9 +317,12 @@ class AuthProvider extends ChangeNotifier {
       final ok = await _supabase.signInWithGoogle();
       if (!ok) {
         _error = 'Google login gagal. Pastikan Google provider diaktifkan di Supabase dan Client ID benar.';
+      } else {
+        AnalyticsService.login('google');
       }
     } catch (e) {
       _error = 'Google login error: $e';
+      MonitoringService.reportError(e, context: 'signInWithGoogle');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -328,6 +339,8 @@ class AuthProvider extends ChangeNotifier {
       await QuotaService().purchaseOrChangeTier(StorageTier.free, carryOver: false);
       _isLoggedIn = false;
       _currentTeam = null;
+      AnalyticsService.logout();
+      MonitoringService.setUser(id: null);
     } finally {
       _isLoading = false;
       notifyListeners();

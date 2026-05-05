@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
+import '../../core/monitoring/analytics_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
 import '../../services/marketplace_detector.dart';
@@ -284,6 +285,7 @@ class ScanProvider extends ChangeNotifier {
             resi: resi,
             marketplace: marketplace,
           );
+          AnalyticsService.scanDuplicate(resi);
           notifyListeners();
           return lastResult;
         }
@@ -387,6 +389,7 @@ class ScanProvider extends ChangeNotifier {
         resi: resi,
         marketplace: marketplace,
       );
+      AnalyticsService.scanComplete(marketplace, hasPhoto: photoPath != null);
       // Reset processing early so next scan isn't blocked
       _processing = false;
       notifyListeners();
