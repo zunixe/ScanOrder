@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
@@ -40,6 +41,11 @@ class ScanProvider extends ChangeNotifier {
   final Map<String, DateTime> _recentScans = {};
   static const Duration _recentRepeatWindow = Duration(seconds: 5);
 
+  // Async states for UI
+  AsyncState<void> countsState = const AsyncState.idle();
+  AsyncState<void> categoriesState = const AsyncState.idle();
+  AsyncState<ScanResult> scanState = const AsyncState.idle();
+
   // Category support (Team tier only)
   List<ScanCategory> categories = [];
   int? activeCategoryId;
@@ -65,60 +71,78 @@ class ScanProvider extends ChangeNotifier {
   }
 
   Future<void> loadCounts() async {
-    final userId = SupabaseService().currentUser?.id;
-    // Migrate old non-user-scoped keys to user-scoped keys, then sync from cloud
-    if (userId != null) {
-      await _quota.migrateToUserScopedKeys();
-      await _quota.syncFromCloud();
-    }
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    if (_teamId != null) {
-      // Team mode: query Supabase for real-time cross-device counts
-      todayCount = await SupabaseService().getTeamTodayScans(_teamId!);
-      totalCount = await SupabaseService().getTeamTotalScans(_teamId!);
-      // Team members have unlimited quota
-      scanLimit = -1;
-      remainingScans = -1;
-    } else {
-      // Personal mode: query local DB
-      todayCount = await _db.getOrderCountByDate(today, userId: userId);
-      totalCount = await _db.getTotalOrderCount(userId: userId);
-    }
-    _savePhoto = await _quota.getSavePhoto();
-    currentTier = await _quota.getTier();
-    if (_teamId == null) {
-      scanLimit = await _quota.getScanLimit();
-      remainingScans = await _quota.getRemainingFreeScans();
-    }
-    debugPrint('[ScanProvider] loadCounts: userId=$userId, tier=$currentTier, scanLimit=$scanLimit, remaining=$remainingScans, todayCount=$todayCount, totalCount=$totalCount, teamId=$_teamId');
-    // Load categories for Team tier or team member
-    if (currentTier == StorageTier.unlimited || _teamId != null) {
-      await loadCategories();
-    }
+    countsState = const AsyncState.loading();
     notifyListeners();
+    try {
+      final userId = SupabaseService().currentUser?.id;
+      // Migrate old non-user-scoped keys to user-scoped keys, then sync from cloud
+      if (userId != null) {
+        await _quota.migrateToUserScopedKeys();
+        await _quota.syncFromCloud();
+      }
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (_teamId != null) {
+        // Team mode: query Supabase for real-time cross-device counts
+        todayCount = await SupabaseService().getTeamTodayScans(_teamId!);
+        totalCount = await SupabaseService().getTeamTotalScans(_teamId!);
+        // Team members have unlimited quota
+        scanLimit = -1;
+        remainingScans = -1;
+      } else {
+        // Personal mode: query local DB
+        todayCount = await _db.getOrderCountByDate(today, userId: userId);
+        totalCount = await _db.getTotalOrderCount(userId: userId);
+      }
+      _savePhoto = await _quota.getSavePhoto();
+      currentTier = await _quota.getTier();
+      if (_teamId == null) {
+        scanLimit = await _quota.getScanLimit();
+        remainingScans = await _quota.getRemainingFreeScans();
+      }
+      debugPrint('[ScanProvider] loadCounts: userId=$userId, tier=$currentTier, scanLimit=$scanLimit, remaining=$remainingScans, todayCount=$todayCount, totalCount=$totalCount, teamId=$_teamId');
+      // Load categories for Team tier or team member
+      if (currentTier == StorageTier.unlimited || _teamId != null) {
+        await loadCategories();
+      }
+      countsState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[ScanProvider] loadCounts error: $e');
+      countsState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadCounts);
+      notifyListeners();
+    }
   }
 
   Future<void> loadCategories() async {
-    final userId = SupabaseService().currentUser?.id;
-    // Team mode: sync categories from Supabase first, then load from local
-    if (_teamId != null) {
-      await _syncTeamCategoriesFromSupabase();
-      categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
-      // Use local DB counts (always accurate) + Supabase counts (cross-device) — take the max
-      final localCounts = await _db.getCategoryCounts(userId: userId);
-      final supStats = await SupabaseService().getTeamCategoryStats(_teamId!);
-      categoryCounts = {};
-      for (final cat in categories) {
-        final local = localCounts[cat.id] ?? 0;
-        final remote = supStats[cat.name] ?? 0;
-        categoryCounts[cat.id!] = local > remote ? local : remote;
-      }
-    } else {
-      categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
-      categoryCounts = await _db.getCategoryCounts(userId: userId);
-    }
-    debugPrint('[ScanProvider] loadCategories: ${categories.length} cats, teamId=$_teamId, adminUserId=$_adminUserId');
+    categoriesState = const AsyncState.loading();
     notifyListeners();
+    try {
+      final userId = SupabaseService().currentUser?.id;
+      // Team mode: sync categories from Supabase first, then load from local
+      if (_teamId != null) {
+        await _syncTeamCategoriesFromSupabase();
+        categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
+        // Use local DB counts (always accurate) + Supabase counts (cross-device) — take the max
+        final localCounts = await _db.getCategoryCounts(userId: userId);
+        final supStats = await SupabaseService().getTeamCategoryStats(_teamId!);
+        categoryCounts = {};
+        for (final cat in categories) {
+          final local = localCounts[cat.id] ?? 0;
+          final remote = supStats[cat.name] ?? 0;
+          categoryCounts[cat.id!] = local > remote ? local : remote;
+        }
+      } else {
+        categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
+        categoryCounts = await _db.getCategoryCounts(userId: userId);
+      }
+      debugPrint('[ScanProvider] loadCategories: ${categories.length} cats, teamId=$_teamId, adminUserId=$_adminUserId');
+      categoriesState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[ScanProvider] loadCategories error: $e');
+      categoriesState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadCategories);
+      notifyListeners();
+    }
   }
 
   /// Sync team categories from Supabase to local DB so they persist
@@ -420,6 +444,8 @@ class ScanProvider extends ChangeNotifier {
     } catch (e, stack) {
       debugPrint('[ScanProvider] processScan error: $e\n$stack');
       _processing = false;
+      scanState = AsyncState.error(e.toString(), stackTrace: stack, retry: () => processScan(rawCode, photoPath, teamId: teamId));
+      notifyListeners();
       return null;
     } finally {
       _processing = false;

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
@@ -18,6 +19,11 @@ class HistoryProvider extends ChangeNotifier {
   int? filterCategoryId;
   List<ScanCategory> categories = [];
   Map<int, int> categoryCounts = {};
+
+  // Async states for UI
+  AsyncState<void> scansState = const AsyncState.idle();
+  AsyncState<void> datesState = const AsyncState.idle();
+  AsyncState<void> categoriesLoadState = const AsyncState.idle();
 
   /// Returns scans filtered by active category (for team mode UI)
   List<ScanRecord> get filteredScans {
@@ -46,59 +52,77 @@ class HistoryProvider extends ChangeNotifier {
   }
 
   Future<void> loadDates() async {
-    if (_teamId != null) {
-      debugPrint('[History] loadDates TEAM mode: teamId=$_teamId');
-      availableDates = await SupabaseService().getTeamDistinctDates(_teamId!);
-      debugPrint('[History] loadDates TEAM result: ${availableDates.length} dates = $availableDates');
-    } else {
-      debugPrint('[History] loadDates PERSONAL mode: userId=$_userId');
-      availableDates = await _db.getDistinctDates(userId: _userId);
-      debugPrint('[History] loadDates PERSONAL result: ${availableDates.length} dates');
-    }
-    // Auto-select first available date if today has no scans (but not if user chose "Semua")
-    if (selectedDate != allDatesSentinel && availableDates.isNotEmpty && !availableDates.contains(selectedDate)) {
-      selectedDate = availableDates.first;
-      debugPrint('[History] loadDates: auto-selected date=$selectedDate');
-    }
+    datesState = const AsyncState.loading();
     notifyListeners();
+    try {
+      if (_teamId != null) {
+        debugPrint('[History] loadDates TEAM mode: teamId=$_teamId');
+        availableDates = await SupabaseService().getTeamDistinctDates(_teamId!);
+        debugPrint('[History] loadDates TEAM result: ${availableDates.length} dates = $availableDates');
+      } else {
+        debugPrint('[History] loadDates PERSONAL mode: userId=$_userId');
+        availableDates = await _db.getDistinctDates(userId: _userId);
+        debugPrint('[History] loadDates PERSONAL result: ${availableDates.length} dates');
+      }
+      // Auto-select first available date if today has no scans (but not if user chose "Semua")
+      if (selectedDate != allDatesSentinel && availableDates.isNotEmpty && !availableDates.contains(selectedDate)) {
+        selectedDate = availableDates.first;
+        debugPrint('[History] loadDates: auto-selected date=$selectedDate');
+      }
+      datesState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[History] loadDates error: $e');
+      datesState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadDates);
+      notifyListeners();
+    }
   }
 
   Future<void> loadScans() async {
-    if (_teamId != null) {
-      // Team mode: query Supabase
-      debugPrint('[History] loadScans TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
-      List<Map<String, dynamic>> raw;
-      if (isSearching && searchQuery.isNotEmpty) {
-        raw = await SupabaseService().searchTeamScans(_teamId!, searchQuery);
-      } else if (selectedDate == allDatesSentinel) {
-        raw = await SupabaseService().fetchTeamScans(_teamId!);
+    scansState = const AsyncState.loading(previousData: null);
+    notifyListeners();
+    try {
+      if (_teamId != null) {
+        // Team mode: query Supabase
+        debugPrint('[History] loadScans TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
+        List<Map<String, dynamic>> raw;
+        if (isSearching && searchQuery.isNotEmpty) {
+          raw = await SupabaseService().searchTeamScans(_teamId!, searchQuery);
+        } else if (selectedDate == allDatesSentinel) {
+          raw = await SupabaseService().fetchTeamScans(_teamId!);
+        } else {
+          raw = await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
+        }
+        debugPrint('[History] loadScans TEAM raw: ${raw.length} rows');
+        if (raw.isNotEmpty) debugPrint('[History] loadScans TEAM sample: ${raw.first}');
+        scans = raw.map((m) => ScanRecord.fromSupabase(m)).toList();
+        debugPrint('[History] loadScans TEAM parsed: ${scans.length} scans');
       } else {
-        raw = await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
-      }
-      debugPrint('[History] loadScans TEAM raw: ${raw.length} rows');
-      if (raw.isNotEmpty) debugPrint('[History] loadScans TEAM sample: ${raw.first}');
-      scans = raw.map((m) => ScanRecord.fromSupabase(m)).toList();
-      debugPrint('[History] loadScans TEAM parsed: ${scans.length} scans');
-    } else {
-      // Personal mode: query local DB
-      if (filterCategoryId != null) {
-        scans = await _db.getScansByCategory(filterCategoryId!, userId: _userId);
-      } else if (isSearching && searchQuery.isNotEmpty) {
-        scans = await _db.searchScans(searchQuery, userId: _userId);
-      } else if (selectedDate == allDatesSentinel) {
-        scans = await _db.getAllScans(userId: _userId);
-      } else {
-        scans = await _db.getScansByDate(selectedDate, userId: _userId);
-      }
-      // Attach categories to scans (local only)
-      for (var i = 0; i < scans.length; i++) {
-        if (scans[i].id != null) {
-          final cats = await _db.getCategoriesForOrder(scans[i].id!);
-          scans[i] = scans[i].copyWith(categories: cats);
+        // Personal mode: query local DB
+        if (filterCategoryId != null) {
+          scans = await _db.getScansByCategory(filterCategoryId!, userId: _userId);
+        } else if (isSearching && searchQuery.isNotEmpty) {
+          scans = await _db.searchScans(searchQuery, userId: _userId);
+        } else if (selectedDate == allDatesSentinel) {
+          scans = await _db.getAllScans(userId: _userId);
+        } else {
+          scans = await _db.getScansByDate(selectedDate, userId: _userId);
+        }
+        // Attach categories to scans (local only)
+        for (var i = 0; i < scans.length; i++) {
+          if (scans[i].id != null) {
+            final cats = await _db.getCategoriesForOrder(scans[i].id!);
+            scans[i] = scans[i].copyWith(categories: cats);
+          }
         }
       }
+      scansState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[History] loadScans error: $e');
+      scansState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadScans);
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   Future<void> setDate(String date) async {
@@ -137,26 +161,35 @@ class HistoryProvider extends ChangeNotifier {
   }
 
   Future<void> loadCategories() async {
-    if (_teamId != null) {
-      // Team mode: sync categories from Supabase to local DB first
-      await _syncTeamCategories();
-      // Load category names from local DB (now synced)
-      categories = await _db.getAllCategories(userId: _userId, adminUserId: _adminUserId);
-      // Use local DB counts (always accurate) + Supabase counts (cross-device) — take the max
-      final localCounts = await _db.getCategoryCounts(userId: _userId);
-      final supStats = await SupabaseService().getTeamCategoryStats(_teamId!);
-      categoryCounts = {};
-      for (final cat in categories) {
-        final local = localCounts[cat.id] ?? 0;
-        final remote = supStats[cat.name] ?? 0;
-        categoryCounts[cat.id!] = local > remote ? local : remote;
-      }
-    } else {
-      categories = await _db.getAllCategories(userId: _userId);
-      categoryCounts = await _db.getCategoryCounts(userId: _userId);
-    }
-    debugPrint('[History] loadCategories: ${categories.length} cats, teamId=$_teamId, counts=$categoryCounts');
+    categoriesLoadState = const AsyncState.loading();
     notifyListeners();
+    try {
+      if (_teamId != null) {
+        // Team mode: sync categories from Supabase to local DB first
+        await _syncTeamCategories();
+        // Load category names from local DB (now synced)
+        categories = await _db.getAllCategories(userId: _userId, adminUserId: _adminUserId);
+        // Use local DB counts (always accurate) + Supabase counts (cross-device) — take the max
+        final localCounts = await _db.getCategoryCounts(userId: _userId);
+        final supStats = await SupabaseService().getTeamCategoryStats(_teamId!);
+        categoryCounts = {};
+        for (final cat in categories) {
+          final local = localCounts[cat.id] ?? 0;
+          final remote = supStats[cat.name] ?? 0;
+          categoryCounts[cat.id!] = local > remote ? local : remote;
+        }
+      } else {
+        categories = await _db.getAllCategories(userId: _userId);
+        categoryCounts = await _db.getCategoryCounts(userId: _userId);
+      }
+      debugPrint('[History] loadCategories: ${categories.length} cats, teamId=$_teamId, counts=$categoryCounts');
+      categoriesLoadState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[History] loadCategories error: $e');
+      categoriesLoadState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadCategories);
+      notifyListeners();
+    }
   }
 
   Future<void> _syncTeamCategories() async {

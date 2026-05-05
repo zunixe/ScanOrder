@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
+import '../../core/widgets/async_state_builder.dart';
 import '../../services/quota_service.dart';
 import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
@@ -47,6 +48,24 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   Widget build(BuildContext context) {
     return Consumer<SubscriptionProvider>(
       builder: (_, provider, _) {
+        // Show loading state
+        if (provider.statusState.isLoading && provider.tierName == 'Gratis') {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Langganan')),
+            body: const Center(child: CircularProgressIndicator()),
+          );
+        }
+        // Show error state
+        if (provider.statusState.hasError && provider.tierName == 'Gratis') {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Langganan')),
+            body: AsyncStateBuilder<void>(
+              state: provider.statusState,
+              onRetry: () => provider.loadStatus(),
+              builder: (_, _s) => const SizedBox.shrink(),
+            ),
+          );
+        }
         return Scaffold(
         appBar: AppBar(
           title: const Text('Langganan'),

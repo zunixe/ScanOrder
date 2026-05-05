@@ -97,12 +97,12 @@ void main() {
   });
 
   group('AppStrings abstract class', () {
-    test('AppStringsId extends AppStrings', () {
-      expect(AppStringsId() is AppStrings, isTrue);
+    test('AppStringsId is AppStrings', () {
+      expect(AppStringsId(), isA<AppStrings>());
     });
 
-    test('AppStringsEn extends AppStrings', () {
-      expect(AppStringsEn() is AppStrings, isTrue);
+    test('AppStringsEn is AppStrings', () {
+      expect(AppStringsEn(), isA<AppStrings>());
     });
   });
 }

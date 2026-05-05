@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
+import '../../core/widgets/async_state_builder.dart';
 import '../../models/scan_record.dart';
 import '../../services/quota_service.dart';
 import 'history_provider.dart';
@@ -445,6 +446,21 @@ class _HistoryPageState extends State<HistoryPage> {
                 // Team tanpa kategori: order list sudah ditampilkan di widget atas, skip
                 if (isTeamUser && provider.filterCategoryId == null && !provider.isSearching && provider.categories.isEmpty) {
                   return const SizedBox.shrink();
+                }
+                // Show loading/error state
+                if (provider.scansState.isLoading && provider.filteredScans.isEmpty) {
+                  return const Expanded(
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (provider.scansState.hasError && provider.filteredScans.isEmpty) {
+                  return Expanded(
+                    child: AsyncStateBuilder<void>(
+                      state: provider.scansState,
+                      onRetry: () => provider.loadScans(),
+                      builder: (_, __) => const SizedBox.shrink(),
+                    ),
+                  );
                 }
                 return Expanded(
                   child: Column(

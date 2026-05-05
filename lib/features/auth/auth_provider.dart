@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/team.dart';
@@ -21,6 +22,10 @@ class AuthProvider extends ChangeNotifier {
   // Team state
   Team? _currentTeam;
   List<TeamMember> _teamMembers = [];
+
+  // Async states for UI
+  AsyncState<void> teamState = const AsyncState.idle();
+  AsyncState<void> syncState = const AsyncState.idle();
 
   // Single-device session
   Timer? _heartbeatTimer;
@@ -76,6 +81,8 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _loadTeam() async {
+    teamState = const AsyncState.loading();
+    notifyListeners();
     try {
       _currentTeam = await _supabase.getMyTeam();
       if (_currentTeam != null) {
@@ -96,8 +103,10 @@ class AuthProvider extends ChangeNotifier {
       } else {
         _teamMembers = [];
       }
-    } catch (e) {
+      teamState = const AsyncState.data(null);
+    } catch (e, stack) {
       debugPrint('Load team error: $e');
+      teamState = AsyncState.error(e.toString(), stackTrace: stack, retry: _loadTeam);
     } finally {
       notifyListeners();
     }
@@ -451,6 +460,8 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> syncOnLogin() async {
+    syncState = const AsyncState.loading();
+    notifyListeners();
     try {
       final userId = _supabase.currentUser?.id;
       final teamId = _currentTeam?.id;
@@ -522,8 +533,12 @@ class AuthProvider extends ChangeNotifier {
       if (teamId != null) {
         await _supabase.repairScanCategories();
       }
-    } catch (e) {
+      syncState = const AsyncState.data(null);
+    } catch (e, stack) {
       debugPrint('Sync error: $e');
+      syncState = AsyncState.error(e.toString(), stackTrace: stack, retry: syncOnLogin);
+    } finally {
+      notifyListeners();
     }
   }
 

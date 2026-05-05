@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../services/iap_service.dart';
 import '../../services/quota_service.dart';
@@ -30,6 +31,9 @@ class SubscriptionProvider extends ChangeNotifier {
   List<String> notFoundProductIds = [];
   List<PackageInfo> packages = [];
 
+  // Async state for UI
+  AsyncState<void> statusState = const AsyncState.idle();
+
   Future<void> initializeIap() async {
     await _quota.loadPackages();
     packages = _quota.packages;
@@ -44,35 +48,44 @@ class SubscriptionProvider extends ChangeNotifier {
   }
 
   Future<void> loadStatus() async {
-    await _quota.migrateToUserScopedKeys();
-    await _quota.syncFromCloud();
-    isPro = await _quota.isPro();
-    // Auto-restore IAP jika user login tapi tier masih Free
-    // (misalnya setelah reinstall app, purchase Google Play belum ter-restore)
-    if (!isPro && _supabase.currentUser != null && !_autoRestoring) {
-      _autoRestoring = true;
-      try {
-        await _autoRestoreIapIfNeeded();
-        isPro = await _quota.isPro();
-      } finally {
-        _autoRestoring = false;
-      }
-    }
-    totalScanned = await _quota.getTotalScanned();
-    remainingFree = await _quota.getRemainingFreeScans();
-    scanLimit = await _quota.getScanLimit();
-    currentTier = await _quota.getTier();
-    scanLimitDisplay = _quota.getScanLimitDisplay(currentTier);
-    tierName = _quota.getTierName(currentTier);
-    tierPrice = _quota.getPriceDisplay(currentTier);
-    usedBytes = await _quota.getUsedBytes();
-    totalBytes = await _quota.getLimit();
-    activeFrom = await _quota.getActiveFrom();
-    activeUntil = await _quota.getActiveUntil();
-    subscriptionActive = await _quota.isSubscriptionActive();
-    cycleAllowance = await _quota.getCycleAllowance();
-    cycleUsed = await _quota.getUsedInCurrentCycle();
+    statusState = const AsyncState.loading();
     notifyListeners();
+    try {
+      await _quota.migrateToUserScopedKeys();
+      await _quota.syncFromCloud();
+      isPro = await _quota.isPro();
+      // Auto-restore IAP jika user login tapi tier masih Free
+      // (misalnya setelah reinstall app, purchase Google Play belum ter-restore)
+      if (!isPro && _supabase.currentUser != null && !_autoRestoring) {
+        _autoRestoring = true;
+        try {
+          await _autoRestoreIapIfNeeded();
+          isPro = await _quota.isPro();
+        } finally {
+          _autoRestoring = false;
+        }
+      }
+      totalScanned = await _quota.getTotalScanned();
+      remainingFree = await _quota.getRemainingFreeScans();
+      scanLimit = await _quota.getScanLimit();
+      currentTier = await _quota.getTier();
+      scanLimitDisplay = _quota.getScanLimitDisplay(currentTier);
+      tierName = _quota.getTierName(currentTier);
+      tierPrice = _quota.getPriceDisplay(currentTier);
+      usedBytes = await _quota.getUsedBytes();
+      totalBytes = await _quota.getLimit();
+      activeFrom = await _quota.getActiveFrom();
+      activeUntil = await _quota.getActiveUntil();
+      subscriptionActive = await _quota.isSubscriptionActive();
+      cycleAllowance = await _quota.getCycleAllowance();
+      cycleUsed = await _quota.getUsedInCurrentCycle();
+      statusState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[SubscriptionProvider] loadStatus error: $e');
+      statusState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadStatus);
+      notifyListeners();
+    }
   }
 
   Future<void> _autoRestoreIapIfNeeded() async {

@@ -5,6 +5,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
+import '../../core/widgets/async_state_builder.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../services/quota_service.dart';
@@ -45,7 +46,19 @@ class _StatsPageState extends State<StatsPage> {
         title: const Text('Statistik'),
       ),
       body: Consumer2<StatsProvider, AuthProvider>(
-        builder: (_, provider, auth, _) => SingleChildScrollView(
+        builder: (_, provider, auth, _) {
+          // Show loading/error state
+          if (provider.statsState.isLoading && provider.totalScans == 0) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (provider.statsState.hasError && provider.totalScans == 0) {
+            return AsyncStateBuilder<void>(
+              state: provider.statsState,
+              onRetry: () => provider.loadStats(),
+              builder: (_, __) => const SizedBox.shrink(),
+            );
+          }
+          return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -717,7 +730,8 @@ class _StatsPageState extends State<StatsPage> {
               ],
             ],
           ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -821,9 +835,9 @@ class _StatsPageState extends State<StatsPage> {
           body: InteractiveViewer(
             child: Center(
               child: photoPath.startsWith('http')
-                  ? Image.network(photoPath, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                  ? Image.network(photoPath, fit: BoxFit.contain, errorBuilder: (_, _e, _s) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                   : File(photoPath).existsSync()
-                      ? Image.file(File(photoPath), fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                      ? Image.file(File(photoPath), fit: BoxFit.contain, errorBuilder: (_, _e, _s) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                       : const Icon(Icons.broken_image, size: 64, color: Colors.grey),
             ),
           ),

@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/team.dart';
@@ -18,6 +19,9 @@ class StatsProvider extends ChangeNotifier {
   Map<String, int> categoryStats = {};
   int totalScans = 0;
   int periodDays = 7;
+
+  // Async state for UI
+  AsyncState<void> statsState = const AsyncState.idle();
 
   // Storage stats
   int dbSizeBytes = 0;
@@ -57,29 +61,38 @@ class StatsProvider extends ChangeNotifier {
   }
 
   Future<void> loadStats() async {
-    final supabase = SupabaseService();
-    final userId = supabase.currentUser?.id;
-    final teamId = _teamId;
-
-    if (teamId != null) {
-      // Team mode: query Supabase for real-time cross-device team stats
-      dailyStats = await supabase.getTeamDailyStats(teamId, periodDays);
-      marketplaceStats = await supabase.getTeamMarketplaceStats(teamId);
-      totalScans = await supabase.getTeamTotalScans(teamId);
-      categoryStats = await supabase.getTeamCategoryStats(teamId);
-    } else {
-      // Personal mode: query local DB
-      dailyStats = await _db.getDailyStats(periodDays, userId: userId);
-      marketplaceStats = await _db.getMarketplaceStats(userId: userId);
-      totalScans = await _db.getTotalOrderCount(userId: userId);
-      categoryStats = await _db.getCategoryStats(userId: userId);
-    }
-    await _loadStorageStats();
-    await _loadSyncStats(userId: userId, teamId: teamId);
-    await _loadCategorySyncStats(userId: userId, teamId: teamId);
-    await _loadTeamStats();
-    debugPrint('[Stats] photoSizeBytes=$photoSizeBytes, cloudPhotoSizeBytes=$cloudPhotoSizeBytes, dbSizeBytes=$dbSizeBytes, cloudDbSizeBytes=$cloudDbSizeBytes');
+    statsState = const AsyncState.loading();
     notifyListeners();
+    try {
+      final supabase = SupabaseService();
+      final userId = supabase.currentUser?.id;
+      final teamId = _teamId;
+
+      if (teamId != null) {
+        // Team mode: query Supabase for real-time cross-device team stats
+        dailyStats = await supabase.getTeamDailyStats(teamId, periodDays);
+        marketplaceStats = await supabase.getTeamMarketplaceStats(teamId);
+        totalScans = await supabase.getTeamTotalScans(teamId);
+        categoryStats = await supabase.getTeamCategoryStats(teamId);
+      } else {
+        // Personal mode: query local DB
+        dailyStats = await _db.getDailyStats(periodDays, userId: userId);
+        marketplaceStats = await _db.getMarketplaceStats(userId: userId);
+        totalScans = await _db.getTotalOrderCount(userId: userId);
+        categoryStats = await _db.getCategoryStats(userId: userId);
+      }
+      await _loadStorageStats();
+      await _loadSyncStats(userId: userId, teamId: teamId);
+      await _loadCategorySyncStats(userId: userId, teamId: teamId);
+      await _loadTeamStats();
+      debugPrint('[Stats] photoSizeBytes=$photoSizeBytes, cloudPhotoSizeBytes=$cloudPhotoSizeBytes, dbSizeBytes=$dbSizeBytes, cloudDbSizeBytes=$cloudDbSizeBytes');
+      statsState = const AsyncState.data(null);
+      notifyListeners();
+    } catch (e, stack) {
+      debugPrint('[Stats] loadStats error: $e');
+      statsState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadStats);
+      notifyListeners();
+    }
   }
 
   Future<void> _loadStorageStats() async {
