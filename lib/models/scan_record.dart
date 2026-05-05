@@ -1,13 +1,21 @@
+import 'package:json_annotation/json_annotation.dart';
 import 'category.dart';
 
+part 'scan_record.g.dart';
+
+@JsonSerializable()
 class ScanRecord {
   final int? id;
   final String resi;
   final String marketplace;
+  @JsonKey(name: 'scanned_at', fromJson: _msToDateTime, toJson: _dateTimeToMs)
   final DateTime scannedAt;
   final String date; // YYYY-MM-DD
+  @JsonKey(name: 'photo_path')
   final String? photoPath; // Path to captured photo
+  @JsonKey(includeFromJson: false, includeToJson: false)
   final List<ScanCategory> categories;
+  @JsonKey(name: 'sync_status', defaultValue: 'synced')
   final String syncStatus;
 
   ScanRecord({
@@ -21,29 +29,10 @@ class ScanRecord {
     this.syncStatus = 'pending',
   });
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'resi': resi,
-      'marketplace': marketplace,
-      'scanned_at': scannedAt.millisecondsSinceEpoch,
-      'date': date,
-      'photo_path': photoPath,
-      'sync_status': syncStatus,
-    };
-  }
+  /// For local DB (snake_case keys, excludes categories — stored in junction table)
+  factory ScanRecord.fromMap(Map<String, dynamic> map) => _$ScanRecordFromJson(map);
 
-  factory ScanRecord.fromMap(Map<String, dynamic> map) {
-    return ScanRecord(
-      id: map['id'] as int?,
-      resi: map['resi'] as String,
-      marketplace: map['marketplace'] as String,
-      scannedAt: DateTime.fromMillisecondsSinceEpoch(map['scanned_at'] as int),
-      date: map['date'] as String,
-      photoPath: map['photo_path'] as String?,
-      syncStatus: (map['sync_status'] as String?) ?? 'synced',
-    );
-  }
+  Map<String, dynamic> toMap() => _$ScanRecordToJson(this);
 
   /// Parse from Supabase response (with nested scan_categories)
   factory ScanRecord.fromSupabase(Map<String, dynamic> m) {
@@ -87,4 +76,14 @@ class ScanRecord {
       syncStatus: syncStatus ?? this.syncStatus,
     );
   }
+
+  // Custom JSON converters for DateTime ↔ milliseconds (handles both int and String)
+  static DateTime _msToDateTime(Object? v) {
+    if (v == null) return DateTime.now();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+    if (v is String) return DateTime.parse(v);
+    return DateTime.now();
+  }
+
+  static int _dateTimeToMs(DateTime dt) => dt.millisecondsSinceEpoch;
 }

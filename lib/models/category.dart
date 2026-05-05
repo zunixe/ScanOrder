@@ -1,8 +1,15 @@
+import 'package:json_annotation/json_annotation.dart';
+
+part 'category.g.dart';
+
+@JsonSerializable()
 class ScanCategory {
   final int? id;
   final String name;
   final String color; // hex color, e.g. '#FF5722'
+  @JsonKey(name: 'user_id')
   final String? userId;
+  @JsonKey(name: 'created_at', fromJson: _msToDateTime, toJson: _dateTimeToMs)
   final DateTime createdAt;
 
   ScanCategory({
@@ -13,27 +20,12 @@ class ScanCategory {
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'color': color,
-      'user_id': userId,
-      'created_at': createdAt.millisecondsSinceEpoch,
-    };
-  }
+  factory ScanCategory.fromJson(Map<String, dynamic> map) => _$ScanCategoryFromJson(map);
+  Map<String, dynamic> toJson() => _$ScanCategoryToJson(this);
 
-  factory ScanCategory.fromMap(Map<String, dynamic> map) {
-    return ScanCategory(
-      id: map['id'] as int?,
-      name: map['name'] as String,
-      color: map['color'] as String,
-      userId: map['user_id'] as String?,
-      createdAt: map['created_at'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int)
-          : DateTime.now(),
-    );
-  }
+  factory ScanCategory.fromSupabase(Map<String, dynamic> map) => _$ScanCategoryFromJson(map);
+  factory ScanCategory.fromMap(Map<String, dynamic> map) => _$ScanCategoryFromJson(map);
+  Map<String, dynamic> toMap() => _$ScanCategoryToJson(this);
 
   ScanCategory copyWith({int? id, String? name, String? color, String? userId}) {
     return ScanCategory(
@@ -52,4 +44,12 @@ class ScanCategory {
 
   @override
   int get hashCode => id.hashCode;
+
+  static DateTime _msToDateTime(Object? v) {
+    if (v == null) return DateTime.now();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+    if (v is String) return DateTime.parse(v);
+    return DateTime.now();
+  }
+  static int _dateTimeToMs(DateTime dt) => dt.millisecondsSinceEpoch;
 }

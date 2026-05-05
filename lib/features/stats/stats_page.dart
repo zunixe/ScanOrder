@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/async_state_builder.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../services/quota_service.dart';
@@ -835,7 +836,7 @@ class _StatsPageState extends State<StatsPage> {
           body: InteractiveViewer(
             child: Center(
               child: photoPath.startsWith('http')
-                  ? Image.network(photoPath, fit: BoxFit.contain, errorBuilder: (_, _e, _s) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
+                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, _u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, _u, _e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                   : File(photoPath).existsSync()
                       ? Image.file(File(photoPath), fit: BoxFit.contain, errorBuilder: (_, _e, _s) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                       : const Icon(Icons.broken_image, size: 64, color: Colors.grey),

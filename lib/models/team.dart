@@ -1,8 +1,16 @@
+import 'package:json_annotation/json_annotation.dart';
+
+part 'team.g.dart';
+
+@JsonSerializable()
 class Team {
   final String id;
   final String name;
+  @JsonKey(name: 'invite_code')
   final String inviteCode;
+  @JsonKey(name: 'created_by')
   final String createdBy;
+  @JsonKey(name: 'created_at', fromJson: _isoToDateTime, toJson: _dateTimeToIso)
   final DateTime createdAt;
 
   Team({
@@ -13,32 +21,22 @@ class Team {
     required this.createdAt,
   });
 
-  factory Team.fromMap(Map<String, dynamic> map) {
-    return Team(
-      id: map['id'] as String,
-      name: map['name'] as String,
-      inviteCode: map['invite_code'] as String,
-      createdBy: map['created_by'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
-    );
-  }
+  factory Team.fromJson(Map<String, dynamic> map) => _$TeamFromJson(map);
+  Map<String, dynamic> toJson() => _$TeamToJson(this);
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'invite_code': inviteCode,
-      'created_by': createdBy,
-      'created_at': createdAt.toIso8601String(),
-    };
-  }
+  factory Team.fromMap(Map<String, dynamic> map) => _$TeamFromJson(map);
+  Map<String, dynamic> toMap() => _$TeamToJson(this);
 }
 
+@JsonSerializable()
 class TeamMember {
   final String id;
+  @JsonKey(name: 'team_id')
   final String teamId;
+  @JsonKey(name: 'user_id')
   final String userId;
   final String role;
+  @JsonKey(name: 'joined_at', fromJson: _isoToDateTime, toJson: _dateTimeToIso)
   final DateTime joinedAt;
   final String? email;
 
@@ -51,25 +49,18 @@ class TeamMember {
     this.email,
   });
 
-  factory TeamMember.fromMap(Map<String, dynamic> map) {
-    return TeamMember(
-      id: map['id'] as String,
-      teamId: map['team_id'] as String,
-      userId: map['user_id'] as String,
-      role: map['role'] as String,
-      joinedAt: DateTime.parse(map['joined_at'] as String),
-      email: map['email'] as String?,
-    );
-  }
+  factory TeamMember.fromJson(Map<String, dynamic> map) => _$TeamMemberFromJson(map);
+  Map<String, dynamic> toJson() => _$TeamMemberToJson(this);
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'team_id': teamId,
-      'user_id': userId,
-      'role': role,
-      'joined_at': joinedAt.toIso8601String(),
-      'email': email,
-    };
-  }
+  factory TeamMember.fromMap(Map<String, dynamic> map) => _$TeamMemberFromJson(map);
+  Map<String, dynamic> toMap() => _$TeamMemberToJson(this);
 }
+
+DateTime _isoToDateTime(Object? v) {
+  if (v == null) return DateTime.now();
+  if (v is String) return DateTime.parse(v);
+  if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+  return DateTime.now();
+}
+
+String _dateTimeToIso(DateTime dt) => dt.toIso8601String();

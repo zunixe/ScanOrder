@@ -34,6 +34,36 @@ android {
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Split per ABI — generates separate APK for each CPU architecture
+        // Reduces APK size significantly (e.g. arm64-v8a only ~60% of fat APK)
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        }
+    }
+
+    // Generate separate APKs per ABI instead of a single fat APK
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
+    // Assign unique versionCode per ABI to allow multiple APKs on Play Store
+    // Formula: versionCode * 10 + abiCode (0=arm64, 1=armeabi, 2=x86_64)
+    val abiCodes = mapOf("arm64-v8a" to 0, "armeabi-v7a" to 1, "x86_64" to 2)
+    androidComponents {
+        onVariants { variant ->
+            variant.outputs.forEach { output ->
+                val abi = output.filters.find { it.filterType == "ABI" }?.identifier
+                val baseCode = flutter.versionCode.toInt()
+                val abiCode = abiCodes[abi] ?: 0
+                output.versionCode.set(baseCode * 10 + abiCode)
+            }
+        }
     }
 
     signingConfigs {

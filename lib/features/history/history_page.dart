@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../core/theme.dart';
 import '../../core/widgets/async_state_builder.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/scan_record.dart';
 import '../../services/quota_service.dart';
 import 'history_provider.dart';
@@ -902,7 +903,7 @@ class _OrderTileState extends State<_OrderTile> {
             maxScale: 4.0,
             child: Center(
               child: photoPath.startsWith('http')
-                  ? Image.network(photoPath, fit: BoxFit.contain)
+                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, _u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, _u, _e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
                   : Image.file(File(photoPath), fit: BoxFit.contain),
             ),
           ),
@@ -920,19 +921,19 @@ class _OrderTileState extends State<_OrderTile> {
           width: 40,
           height: 40,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildAvatar(color),
+          errorBuilder: (_, _e, _s) => _buildAvatar(color),
         ),
       );
     }
     if (order.photoPath != null && _resolvingPhoto) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          order.photoPath!,
+        child: CachedNetworkImage(
+          imageUrl: order.photoPath!,
           width: 40,
           height: 40,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildAvatar(color),
+          errorWidget: (_, _u, _e) => _buildAvatar(color),
         ),
       );
     }
