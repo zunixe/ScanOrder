@@ -754,11 +754,11 @@ class SupabaseService {
     try {
       // Fetch all scan_categories
       final rows = await client.from('scan_categories').select('id, scan_id, category_id');
-      final seen = <String, int>{}; // 'scan_id:category_id' -> first row id
-      final duplicateIds = <int>[];
+      final seen = <String, dynamic>{}; // 'scan_id:category_id' -> first row id
+      final duplicateIds = <dynamic>[];
       for (final row in rows as List) {
         final key = '${row['scan_id']}:${row['category_id']}';
-        final rowId = row['id'] as int;
+        final rowId = row['id'];
         if (seen.containsKey(key)) {
           duplicateIds.add(rowId);
         } else {

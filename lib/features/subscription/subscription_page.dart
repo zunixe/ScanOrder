@@ -232,7 +232,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         const SizedBox(height: 12),
                         _FeatureRow(
                           icon: Icons.qr_code_scanner,
-                          title: '5.000 Scan / Bulan',
+                          title: '9.000 Scan / Bulan',
                           subtitle: 'Kuota scan besar untuk kebutuhan profesional.',
                         ),
                         _FeatureRow(
@@ -242,8 +242,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         ),
                         _FeatureRow(
                           icon: Icons.cloud_sync_outlined,
-                          title: 'Backup & Sync Cloud',
-                          subtitle: 'Data scan tersimpan lokal dan bisa disinkronkan ke cloud.',
+                          title: 'Backup & Sync Cloud (5GB)',
+                          subtitle: 'Foto tersimpan di cloud hingga 5GB. Foto lama otomatis ke lokal.',
                         ),
                         _FeatureRow(
                           icon: Icons.file_download_outlined,
@@ -285,7 +285,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         const SizedBox(height: 12),
                         _FeatureRow(
                           icon: Icons.qr_code_scanner,
-                          title: '1.000 Scan / Bulan',
+                          title: '3.000 Scan / Bulan',
                           subtitle: 'Kuota scan untuk kebutuhan harian.',
                         ),
                         _FeatureRow(
@@ -295,8 +295,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         ),
                         _FeatureRow(
                           icon: Icons.cloud_sync_outlined,
-                          title: 'Backup & Sync Cloud',
-                          subtitle: 'Data scan tersimpan lokal dan bisa disinkronkan ke cloud.',
+                          title: 'Backup & Sync Cloud (2GB)',
+                          subtitle: 'Foto tersimpan di cloud hingga 2GB. Foto lama otomatis ke lokal.',
                         ),
                         _FeatureRow(
                           icon: Icons.file_download_outlined,
@@ -353,8 +353,8 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
                         ),
                         _FeatureRow(
                           icon: Icons.cloud_sync_outlined,
-                          title: 'Backup & Sync Cloud',
-                          subtitle: 'Data scan tersimpan lokal dan bisa disinkronkan ke cloud.',
+                          title: 'Backup & Sync Cloud (15GB)',
+                          subtitle: 'Foto tersimpan di cloud hingga 15GB. Foto lama otomatis ke lokal.',
                         ),
                         _FeatureRow(
                           icon: Icons.file_download_outlined,
@@ -696,7 +696,7 @@ class _UpgradeCard extends StatelessWidget {
               tier: StorageTier.pro,
               name: 'Pro',
               price: 'Rp 99.000',
-              scans: '5.000 scan/bulan$carryInfo',
+              scans: '9.000 scan/bulan$carryInfo',
             ),
             _UpgradeOption(
               tier: StorageTier.unlimited,
@@ -796,7 +796,7 @@ class _FaqSection extends StatelessWidget {
         ),
         _FaqItem(
           question: 'Apa perbedaan paket Gratis, Basic, Pro, dan Team?',
-          answer: '• Gratis: 100 scan/bulan, tanpa foto\n• Basic: 1.000 scan/bulan + foto + cloud sync + export XLSX\n• Pro: 5.000 scan/bulan + foto + cloud sync + statistik lengkap\n• Team: Unlimited scan + kolaborasi tim hingga 10 anggota + kategori bersama',
+          answer: '• Gratis: 200 scan/bulan, tanpa foto cloud\n• Basic: 3.000 scan/bulan + foto + cloud sync 2GB + export XLSX\n• Pro: 9.000 scan/bulan + foto + cloud sync 5GB + statistik lengkap\n• Team: Unlimited scan + kolaborasi tim hingga 10 anggota + cloud sync 15GB + kategori bersama',
         ),
         _FaqItem(
           question: 'Bagaimana cara kerja cloud sync?',

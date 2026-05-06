@@ -9,6 +9,7 @@ import '../core/db/database_helper.dart';
 import '../core/monitoring/monitoring_service.dart';
 import '../core/monitoring/analytics_service.dart';
 import '../core/notifications/notification_service.dart';
+import 'quota_service.dart';
 
 /// Task yang perlu di-sync ke Supabase
 enum SyncTaskType { insertScan, uploadPhoto, syncSubscription, insertScanCategory }
@@ -449,6 +450,18 @@ class SyncQueue {
     return supabaseUpdated;
   }
 
+  /// After processing all pending tasks, check cloud storage and evict if needed
+  Future<void> evictPhotosIfNeeded() async {
+    try {
+      final evicted = await QuotaService().evictOldPhotosIfNeeded();
+      if (evicted > 0) {
+        AppLogger.info('SyncQueue', 'Evicted $evicted oldest photos from cloud');
+      }
+    } catch (e) {
+      AppLogger.info('SyncQueue', 'Evict photos error: $e');
+    }
+  }
+
   Future<bool> _processSyncSubscription(SyncTask task) async {
     final p = task.payload;
     final client = _supabase.client;
@@ -544,6 +557,8 @@ class SyncQueue {
       await MonitoringService.measure('sync_queue_startup', 'process_pending', () async {
         _tryProcess();
       });
+      // Evict oldest photos if cloud storage is over limit after processing
+      await evictPhotosIfNeeded();
     }
   }
 

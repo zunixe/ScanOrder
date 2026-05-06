@@ -1,6 +1,7 @@
 import 'dart:io';
 import '../core/logging/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
 import '../core/db/database_helper.dart';
 import '../core/supabase/supabase_service.dart';
 import 'sync_queue.dart';
@@ -40,26 +41,27 @@ class PackageInfo {
 
 class QuotaService {
   // Scan limits per tier (per bulan)
-  static const int _freeScans = 100;
-  static const int _basicScans = 1000;
-  static const int _proScans = 5000;
+  static const int _freeScans = 200;
+  static const int _basicScans = 3000;
+  static const int _proScans = 9000;
 
   // Harga per tier (IDR)
   static const int _basicPrice = 29000;
   static const int _proPrice = 99000;
   static const int _teamPrice = 399000;
 
-  // Storage limits per tier (bytes) - untuk info foto saja
-  static const int _freeLimit = 100 * 1024 * 1024;       // 100MB
-  static const int _basicLimit = 2 * 1024 * 1024 * 1024; // 2GB
-  static const int _proLimit = 10 * 1024 * 1024 * 1024;  // 10GB
+  // Cloud storage limits per tier (bytes) - untuk foto di cloud
+  static const int _freeLimit = 0;                        // Free: lokal saja, tidak upload ke cloud
+  static const int _basicLimit = 2 * 1024 * 1024 * 1024;  // 2GB
+  static const int _proLimit = 5 * 1024 * 1024 * 1024;    // 5GB
+  static const int _teamLimit = 15 * 1024 * 1024 * 1024;  // 15GB
 
   // Hardcoded fallback packages (dipakai jika DB tidak bisa diakses)
   static const List<PackageInfo> _fallbackPackages = [
-    PackageInfo(id: 'free',      name: 'Gratis',  price: 0,      scanLimit: 100,  maxMembers: 1,  features: ['Scan resi barcode','100 scan/bulan','Copy resi cepat'], isPopular: false),
-    PackageInfo(id: 'basic',     name: 'Basic', price: 29000,  scanLimit: 1000, maxMembers: 1,  features: ['1.000 scan/bulan','Gabung tim via kode invite','Backup & sync cloud','Export XLSX/CSV','Copy resi cepat','Foto bukti scan'], isPopular: false),
-    PackageInfo(id: 'pro',       name: 'Pro',   price: 99000,  scanLimit: 5000, maxMembers: 1,  features: ['5.000 scan/bulan','Gabung tim via kode invite','Backup & sync cloud','Export XLSX/CSV','Foto bukti scan','Copy resi cepat','Statistik lengkap'], isPopular: true),
-    PackageInfo(id: 'unlimited', name: 'Tim',  price: 399000, scanLimit: 0,    maxMembers: 10, features: ['Unlimited scan/bulan','Buat & kelola tim','Hingga 10 anggota tim','Kategori wajib per scan','Backup & sync cloud','Export XLSX/CSV','Foto bukti scan','Statistik lengkap','Copy resi cepat','Dukungan prioritas'], isPopular: false),
+    PackageInfo(id: 'free',      name: 'Gratis',  price: 0,      scanLimit: 200,  maxMembers: 1,  features: ['Scan resi barcode','200 scan/bulan','Copy resi cepat'], isPopular: false),
+    PackageInfo(id: 'basic',     name: 'Basic', price: 29000,  scanLimit: 3000, maxMembers: 1,  features: ['3.000 scan/bulan','Gabung tim via kode invite','Backup & sync cloud (2GB)','Export XLSX/CSV','Copy resi cepat','Foto bukti scan'], isPopular: false),
+    PackageInfo(id: 'pro',       name: 'Pro',   price: 99000,  scanLimit: 9000, maxMembers: 1,  features: ['9.000 scan/bulan','Gabung tim via kode invite','Backup & sync cloud (5GB)','Export XLSX/CSV','Foto bukti scan','Copy resi cepat','Statistik lengkap'], isPopular: true),
+    PackageInfo(id: 'unlimited', name: 'Tim',  price: 399000, scanLimit: 0,    maxMembers: 10, features: ['Unlimited scan/bulan','Buat & kelola tim','Hingga 10 anggota tim','Kategori wajib per scan','Backup & sync cloud (15GB)','Export XLSX/CSV','Foto bukti scan','Statistik lengkap','Copy resi cepat','Dukungan prioritas'], isPopular: false),
   ];
 
   List<PackageInfo> _packages = [];
@@ -211,7 +213,7 @@ class QuotaService {
     final tier = await getTier();
     final active = await isSubscriptionActive();
 
-    // If subscription expired, fall back to free quota (100/month)
+    // If subscription expired, fall back to free quota (200/month)
     if (tier != StorageTier.free && !active) {
       // Allow scanning with free-tier quota as fallback
       final freeAllowance = _freeScans;
@@ -309,17 +311,23 @@ class QuotaService {
       case StorageTier.free: return _freeLimit;
       case StorageTier.basic: return _basicLimit;
       case StorageTier.pro: return _proLimit;
-      case StorageTier.unlimited: return -1; // unlimited
+      case StorageTier.unlimited: return _teamLimit;
     }
   }
 
+  /// Total bytes used by photos in cloud storage (Supabase URLs only)
   Future<int> getUsedBytes() async {
     final userId = _supabase.currentUser?.id;
+    // Use cloud-reported storage_used if available
+    final prefs = await SharedPreferences.getInstance();
+    final cloudUsed = prefs.getInt(_userKey('cloud_storage_used'));
+    if (cloudUsed != null && cloudUsed > 0) return cloudUsed;
+    // Fallback: count local file sizes of cloud-synced photos
     final scans = await _db.getAllScans(userId: userId);
     int total = 0;
     for (final order in scans) {
       final path = order.photoPath;
-      if (path != null) {
+      if (path != null && path.startsWith('http')) {
         try {
           final file = File(path);
           if (file.existsSync()) total += file.lengthSync();
@@ -329,11 +337,108 @@ class QuotaService {
     return total;
   }
 
+  /// Check if cloud storage is over limit and evict oldest photos
+  /// Downloads oldest cloud photos to local, then deletes from Supabase
+  Future<int> evictOldPhotosIfNeeded() async {
+    final limit = await getLimit();
+    if (limit <= 0) return 0; // Free tier: no cloud storage, nothing to evict
+
+    final used = await getUsedBytes();
+    if (used <= limit) return 0; // Still within limit
+
+    AppLogger.info('QuotaService', 'Cloud storage over limit: used=$used, limit=$limit, evicting oldest photos');
+    final userId = _supabase.currentUser?.id;
+    if (userId == null) return 0;
+
+    final client = _supabase.client;
+    if (client == null) return 0;
+
+    // Get scans with cloud photos, sorted by oldest first
+    final scans = await _db.getAllScans(userId: userId);
+    final cloudScans = scans.where((o) =>
+        o.photoPath != null && o.photoPath!.startsWith('http') && o.id != null
+    ).toList()
+      ..sort((a, b) => a.scannedAt.compareTo(b.scannedAt));
+
+    int evicted = 0;
+    int freedBytes = 0;
+    final dir = await getApplicationDocumentsDirectory();
+
+    for (final scan in cloudScans) {
+      if (used - freedBytes <= limit) break;
+
+      final cloudUrl = scan.photoPath!;
+      try {
+        // Extract storage path from URL
+        final uri = Uri.parse(cloudUrl);
+        final segments = uri.pathSegments;
+        final bucketIndex = segments.indexOf('scan-photos');
+        if (bucketIndex < 0 || bucketIndex + 1 >= segments.length) continue;
+
+        final storagePath = segments.sublist(bucketIndex + 1).join('/');
+
+        // Download to local first
+        final localFile = File('${dir.path}/scan_${scan.scannedAt.millisecondsSinceEpoch}.jpg');
+        if (!await localFile.exists()) {
+          final localPath = await _supabase.downloadPhoto(storagePath, localFile.path);
+          if (localPath == null) continue;
+        }
+
+        // Delete from Supabase Storage
+        try {
+          await client.storage.from('scan-photos').remove([storagePath]);
+        } catch (e) {
+          AppLogger.info('QuotaService', 'Failed to delete photo from Supabase: $e');
+          continue;
+        }
+
+        // Clear photo_url in Supabase scans table
+        try {
+          await client.from('scans').update({'photo_url': null}).eq('resi', scan.resi);
+        } catch (e) {
+          AppLogger.info('QuotaService', 'Failed to clear photo_url in Supabase: $e');
+        }
+
+        // Update local DB to local path
+        await _db.updateScanPhoto(scan.id!, localFile.path);
+
+        // Estimate freed bytes
+        try {
+          freedBytes += await localFile.length();
+        } catch (_) {}
+
+        evicted++;
+      } catch (e) {
+        AppLogger.info('QuotaService', 'Evict photo error for resi=${scan.resi}: $e');
+      }
+    }
+
+    if (evicted > 0) {
+      AppLogger.info('QuotaService', 'Evicted $evicted oldest photos from cloud (freed ~${freedBytes ~/ 1024}KB)');
+      // Update cloud storage used
+      final prefs = await SharedPreferences.getInstance();
+      final newUsed = (used - freedBytes).clamp(0, used);
+      await prefs.setInt(_userKey('cloud_storage_used'), newUsed);
+    }
+
+    return evicted;
+  }
+
+  /// Check if cloud storage is at or over limit
+  Future<bool> isCloudStorageFull() async {
+    final tier = await getTier();
+    if (tier == StorageTier.free) return false; // Free doesn't use cloud
+    final limit = await getLimit();
+    if (limit <= 0) return false;
+    final used = await getUsedBytes();
+    return used >= limit;
+  }
+
   Future<int> getRemainingBytes() async {
     final used = await getUsedBytes();
     final limit = await getLimit();
-    if (limit < 0) return -1; // unlimited
-    return limit - used;
+    if (limit <= 0) return -1; // no cloud storage (free)
+    return (limit - used).clamp(0, limit);
   }
 
   Future<int> getTotalScanned() async {
@@ -369,7 +474,7 @@ class QuotaService {
     // Fallback
     switch (tier) {
       case StorageTier.free: return '$_freeScans';
-      case StorageTier.basic: return '$_basicScans';
+      case StorageTier.basic: return '${_basicScans ~/ 1000}rb';
       case StorageTier.pro: return '${_proScans ~/ 1000}rb';
       case StorageTier.unlimited: return '∞';
     }

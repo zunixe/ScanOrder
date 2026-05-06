@@ -94,7 +94,7 @@ void main() {
   group('PackageInfo', () {
     test('priceDisplay returns Gratis for price 0', () {
       const pkg = PackageInfo(
-        id: 'free', name: 'Free', price: 0, scanLimit: 100,
+        id: 'free', name: 'Free', price: 0, scanLimit: 200,
         maxMembers: 1, features: [], isPopular: false,
       );
       expect(pkg.priceDisplay, 'Gratis');
@@ -102,7 +102,7 @@ void main() {
 
     test('priceDisplay formats Rp with dots', () {
       const pkg = PackageInfo(
-        id: 'pro', name: 'Pro', price: 99000, scanLimit: 5000,
+        id: 'pro', name: 'Pro', price: 99000, scanLimit: 9000,
         maxMembers: 1, features: [], isPopular: true,
       );
       expect(pkg.priceDisplay, 'Rp 99.000');
@@ -126,18 +126,18 @@ void main() {
 
     test('scanLimitDisplay returns rb for >= 1000', () {
       const pkg = PackageInfo(
-        id: 'pro', name: 'Pro', price: 99000, scanLimit: 5000,
+        id: 'pro', name: 'Pro', price: 99000, scanLimit: 9000,
         maxMembers: 1, features: [], isPopular: true,
       );
-      expect(pkg.scanLimitDisplay, '5rb');
+      expect(pkg.scanLimitDisplay, '9rb');
     });
 
     test('scanLimitDisplay returns number for < 1000', () {
       const pkg = PackageInfo(
-        id: 'free', name: 'Free', price: 0, scanLimit: 100,
+        id: 'free', name: 'Free', price: 0, scanLimit: 200,
         maxMembers: 1, features: [], isPopular: false,
       );
-      expect(pkg.scanLimitDisplay, '100');
+      expect(pkg.scanLimitDisplay, '200');
     });
   });
 
@@ -156,7 +156,7 @@ void main() {
     test('fallback free package has correct limits', () {
       final quota = QuotaService();
       final free = quota.packages.firstWhere((p) => p.id == 'free');
-      expect(free.scanLimit, 100);
+      expect(free.scanLimit, 200);
       expect(free.price, 0);
       expect(free.maxMembers, 1);
     });
@@ -194,9 +194,9 @@ void main() {
 
     test('getScanLimitDisplay returns correct limits', () {
       final quota = QuotaService();
-      expect(quota.getScanLimitDisplay(StorageTier.free), '100');
-      expect(quota.getScanLimitDisplay(StorageTier.basic), '1rb');
-      expect(quota.getScanLimitDisplay(StorageTier.pro), '5rb');
+      expect(quota.getScanLimitDisplay(StorageTier.free), '200');
+      expect(quota.getScanLimitDisplay(StorageTier.basic), '3rb');
+      expect(quota.getScanLimitDisplay(StorageTier.pro), '9rb');
       expect(quota.getScanLimitDisplay(StorageTier.unlimited), '∞');
     });
   });

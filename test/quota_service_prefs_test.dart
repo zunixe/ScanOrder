@@ -160,7 +160,7 @@ void main() {
     group('getLimit', () {
       test('free tier limit', () async {
         final limit = await quota.getLimit();
-        expect(limit, 100 * 1024 * 1024);
+        expect(limit, 0); // Free: no cloud storage
       });
 
       test('pro tier limit', () async {
@@ -172,10 +172,10 @@ void main() {
             DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch);
         await prefs.setInt('subscription_cycle_allowance_anon', 5000);
         final limit = await quota.getLimit();
-        expect(limit, 10 * 1024 * 1024 * 1024);
+        expect(limit, 5 * 1024 * 1024 * 1024);
       });
 
-      test('unlimited tier returns -1', () async {
+      test('unlimited tier returns 15GB', () async {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('storage_tier_anon', 'unlimited');
         await prefs.setInt('subscription_cycle_start_ms_anon',
@@ -184,14 +184,14 @@ void main() {
             DateTime.now().add(const Duration(days: 30)).millisecondsSinceEpoch);
         await prefs.setInt('subscription_cycle_allowance_anon', -1);
         final limit = await quota.getLimit();
-        expect(limit, -1);
+        expect(limit, 15 * 1024 * 1024 * 1024);
       });
     });
 
     group('getCycleAllowance', () {
       test('defaults to free allowance', () async {
         final allowance = await quota.getCycleAllowance();
-        expect(allowance, 100);
+        expect(allowance, 200);
       });
     });
 
@@ -212,9 +212,9 @@ void main() {
 
     group('display helpers', () {
       test('getScanLimitDisplay for all tiers', () {
-        expect(quota.getScanLimitDisplay(StorageTier.free), '100');
-        expect(quota.getScanLimitDisplay(StorageTier.basic), '1rb');
-        expect(quota.getScanLimitDisplay(StorageTier.pro), '5rb');
+        expect(quota.getScanLimitDisplay(StorageTier.free), '200');
+        expect(quota.getScanLimitDisplay(StorageTier.basic), '3rb');
+        expect(quota.getScanLimitDisplay(StorageTier.pro), '9rb');
         expect(quota.getScanLimitDisplay(StorageTier.unlimited), '∞');
       });
 
@@ -297,9 +297,9 @@ void main() {
     });
 
     group('getScanLimit', () {
-      test('free tier returns 100', () async {
+      test('free tier returns 200', () async {
         final limit = await quota.getScanLimit();
-        expect(limit, 100);
+        expect(limit, 200);
       });
     });
 

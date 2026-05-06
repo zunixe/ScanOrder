@@ -743,13 +743,26 @@ class _SettingsSection extends StatelessWidget {
 // 4. SYNC SECTION
 // ────────────────────────────────────────────────────────────
 
-class _SyncSection extends StatelessWidget {
+class _SyncSection extends StatefulWidget {
   final AuthProvider auth;
   const _SyncSection({required this.auth});
 
   @override
+  State<_SyncSection> createState() => _SyncSectionState();
+}
+
+class _SyncSectionState extends State<_SyncSection> {
+  late Future<bool> _cloudFullFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _cloudFullFuture = QuotaService().isCloudStorageFull();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isLoggedIn = auth.isLoggedIn;
+    final isLoggedIn = widget.auth.isLoggedIn;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -770,6 +783,34 @@ class _SyncSection extends StatelessWidget {
               : 'Login untuk backup & sync otomatis', style: _settingsSubtitleStyle),
         ),
         if (isLoggedIn) ...[
+          // Cloud storage warning
+          FutureBuilder<bool>(
+            future: _cloudFullFuture,
+            builder: (_, snap) {
+              if (snap.data != true) return const SizedBox.shrink();
+              return Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withAlpha(25),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withAlpha(80)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_off_outlined, color: Colors.orange[700], size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Penyimpanan cloud untuk foto sudah penuh. Foto lama akan disimpan di lokal.',
+                        style: TextStyle(fontSize: 12, color: Colors.orange[900]),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           ListTile(
             dense: true,
             contentPadding: _settingsTilePadding,
@@ -778,13 +819,44 @@ class _SyncSection extends StatelessWidget {
             subtitle: const Text('Upload data scan dan foto yang belum sync', style: _settingsSubtitleStyle),
             onTap: () async {
               try {
-                // Re-enqueue foto yang belum sync (local path, bukan cloud URL)
                 final db = DatabaseHelper.instance;
                 final userId = SupabaseService().currentUser?.id;
                 final syncQueue = SyncQueue();
                 if (userId != null) {
                   final scans = await db.getAllScans(userId: userId);
                   int reEnqueued = 0;
+
+                  // 1. Enqueue insertScan for scans not yet in Supabase
+                  final client = SupabaseService().client;
+                  if (client != null) {
+                    try {
+                      final cloudResis = (await client
+                              .from('scans')
+                              .select('resi')
+                              .eq('user_id', userId))
+                          .map((r) => r['resi'] as String)
+                          .toSet();
+                      for (final o in scans) {
+                        if (!cloudResis.contains(o.resi)) {
+                          syncQueue.enqueue(SyncTaskType.insertScan, {
+                            'device_id': 'manual_push',
+                            'user_id': userId,
+                            'resi': o.resi,
+                            'marketplace': o.marketplace,
+                            'scanned_at': o.scannedAt.millisecondsSinceEpoch.toString(),
+                            'date': o.date,
+                            'photo_url': (o.photoPath != null && o.photoPath!.startsWith('http')) ? o.photoPath : null,
+                            'scanned_by': userId,
+                          });
+                          reEnqueued++;
+                        }
+                      }
+                    } catch (e) {
+                      AppLogger.info('Settings', 'Check cloud scans error: $e');
+                    }
+                  }
+
+                  // 2. Enqueue uploadPhoto for photos not yet in cloud
                   for (final o in scans) {
                     if (o.photoPath != null &&
                         o.photoPath!.isNotEmpty &&
@@ -794,44 +866,68 @@ class _SyncSection extends StatelessWidget {
                         'local_path': o.photoPath,
                         'user_id': userId,
                         'resi': o.resi,
+                        'marketplace': o.marketplace,
+                        'scanned_at': o.scannedAt.millisecondsSinceEpoch.toString(),
+                        'date': o.date,
                         'cloud_filename': '$userId/${o.scannedAt.millisecondsSinceEpoch}.jpg',
                       });
                       reEnqueued++;
                     }
                   }
-                  // Also fix scans in Supabase where photo_url is still a local path
-                  try {
-                    final client = SupabaseService().client;
-                    if (client != null) {
+
+                  // 3. Fix stale photo_url in Supabase (local path instead of cloud URL)
+                  if (client != null) {
+                    try {
                       final badScans = await client
                           .from('scans')
                           .select('resi,photo_url')
-                          .eq('user_id', userId)
-                          .like('photo_url', '/%');
+                          .eq('user_id', userId);
                       for (final s in badScans) {
+                        final photoUrl = s['photo_url'] as String?;
                         final resi = s['resi'] as String;
-                        // Find matching local order with cloud URL
-                        final match = scans.where((o) => o.resi == resi && o.photoPath != null && o.photoPath!.startsWith('http')).firstOrNull;
-                        if (match != null) {
-                          await client.from('scans').update({'photo_url': match.photoPath}).eq('resi', resi);
-                          reEnqueued++;
+                        if (photoUrl != null && !photoUrl.startsWith('http')) {
+                          // Stale local path in Supabase — check if local has cloud URL
+                          final match = scans.where((o) => o.resi == resi && o.photoPath != null && o.photoPath!.startsWith('http')).firstOrNull;
+                          if (match != null) {
+                            await client.from('scans').update({'photo_url': match.photoPath}).eq('resi', resi);
+                          } else if (!File(photoUrl).existsSync()) {
+                            // Local file gone — clear stale path
+                            await client.from('scans').update({'photo_url': null}).eq('resi', resi);
+                          } else {
+                            // File exists locally — re-enqueue upload
+                            syncQueue.enqueue(SyncTaskType.uploadPhoto, {
+                              'local_path': photoUrl,
+                              'user_id': userId,
+                              'resi': resi,
+                              'cloud_filename': '$userId/${DateTime.now().millisecondsSinceEpoch}.jpg',
+                            });
+                          }
                         }
                       }
+                    } catch (e) {
+                      AppLogger.info('Settings', 'Fix Supabase photo_url error: $e');
                     }
-                  } catch (e) {
-                    AppLogger.info('Settings', 'Fix Supabase photo_url error: $e');
                   }
+
                   if (reEnqueued > 0) {
-                    AppLogger.info('Settings', 'Re-enqueued $reEnqueued photos for upload');
+                    AppLogger.info('Settings', 'Re-enqueued $reEnqueued tasks for push');
                   }
                 }
                 await syncQueue.processPending();
+
+                // 4. Evict oldest photos if cloud storage is over limit
+                final evicted = await QuotaService().evictOldPhotosIfNeeded();
+                if (evicted > 0) {
+                  AppLogger.info('Settings', 'Evicted $evicted oldest photos from cloud');
+                }
+
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Push data & foto selesai'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
+                    SnackBar(content: Text('Push data & foto selesai${evicted > 0 ? ' ($evicted foto lama dipindah ke lokal)' : ''}'), duration: Duration(seconds: 3), behavior: SnackBarBehavior.floating),
                   );
                 }
               } catch (e) {
+                AppLogger.info('Settings', 'Push error: $e');
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Gagal push: $e')),
@@ -849,12 +945,15 @@ class _SyncSection extends StatelessWidget {
             onTap: () async {
               try {
                 await context.read<AuthProvider>().syncOnLogin();
+                // Evict oldest photos if cloud storage is over limit
+                final evicted = await QuotaService().evictOldPhotosIfNeeded();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Pull data selesai'), duration: Duration(seconds: 2), behavior: SnackBarBehavior.floating),
+                    SnackBar(content: Text('Pull data selesai${evicted > 0 ? ' ($evicted foto lama dipindah ke lokal)' : ''}'), duration: Duration(seconds: 3), behavior: SnackBarBehavior.floating),
                   );
                 }
               } catch (e) {
+                AppLogger.info('Settings', 'Pull error: $e');
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Gagal pull: $e')),
