@@ -23,7 +23,11 @@ void main() async {
   await AnalyticsService.appOpen();
 
   // Process any pending sync tasks from previous sessions
-  SyncQueue().processPending();
+  try {
+    SyncQueue().processPending();
+  } catch (e) {
+    debugPrint('SyncQueue processPending error: $e');
+  }
 
   runApp(const ScanOrderApp());
 }

@@ -27,8 +27,12 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
   @override
   void initState() {
     super.initState();
-    context.read<SubscriptionProvider>().loadStatus();
-    context.read<SubscriptionProvider>().initializeIap();
+    // Defer to after first frame to avoid setState() during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<SubscriptionProvider>().loadStatus();
+      context.read<SubscriptionProvider>().initializeIap();
+    });
     // Reload subscription status when auth changes (e.g. after login)
     _authProvider = context.read<AuthProvider>();
     _authProvider.addListener(_onAuthChange);

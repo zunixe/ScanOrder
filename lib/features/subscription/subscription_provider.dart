@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../core/logging/logger.dart';
 import '../../core/state/async_state.dart';
@@ -36,12 +37,20 @@ class SubscriptionProvider extends ChangeNotifier {
   AsyncState<void> statusState = const AsyncState.idle();
 
   Future<void> initializeIap() async {
-    await _quota.loadPackages();
+    try {
+      await _quota.loadPackages().timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      AppLogger.info('SubscriptionProvider', 'loadPackages timed out, using fallback');
+    }
     packages = _quota.packages;
-    await _iap.initialize(onPurchaseApplied: (_) async {
-      isPurchasing = false;
-      await loadStatus();
-    });
+    try {
+      await _iap.initialize(onPurchaseApplied: (_) async {
+        isPurchasing = false;
+        await loadStatus();
+      }).timeout(const Duration(seconds: 10));
+    } on TimeoutException {
+      AppLogger.info('SubscriptionProvider', 'IAP initialize timed out');
+    }
     iapAvailable = _iap.isAvailable;
     notFoundProductIds = _iap.notFoundProductIds;
     // Don't show product-not-found error on init — only when user tries to buy
@@ -52,16 +61,22 @@ class SubscriptionProvider extends ChangeNotifier {
     statusState = const AsyncState.loading();
     notifyListeners();
     try {
-      await _quota.migrateToUserScopedKeys();
-      await _quota.syncFromCloud();
+      await _quota.migrateToUserScopedKeys().timeout(const Duration(seconds: 5));
+      try {
+        await _quota.syncFromCloud().timeout(const Duration(seconds: 10));
+      } on TimeoutException {
+        AppLogger.info('SubscriptionProvider', 'syncFromCloud timed out, using local data');
+      }
       isPro = await _quota.isPro();
       // Auto-restore IAP jika user login tapi tier masih Free
       // (misalnya setelah reinstall app, purchase Google Play belum ter-restore)
       if (!isPro && _supabase.currentUser != null && !_autoRestoring) {
         _autoRestoring = true;
         try {
-          await _autoRestoreIapIfNeeded();
+          await _autoRestoreIapIfNeeded().timeout(const Duration(seconds: 15));
           isPro = await _quota.isPro();
+        } on TimeoutException {
+          AppLogger.info('SubscriptionProvider', 'Auto-restore IAP timed out');
         } finally {
           _autoRestoring = false;
         }
@@ -112,7 +127,11 @@ class SubscriptionProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    await _iap.restorePurchases();
+    try {
+      await _iap.restorePurchases().timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      AppLogger.info('SubscriptionProvider', 'restorePurchases timed out');
+    }
     isPurchasing = false;
     await loadStatus();
   }

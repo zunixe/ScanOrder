@@ -72,13 +72,29 @@ class DatabaseHelper {
     // One-time migration: delete old unencrypted DB
     await _migrateToEncrypted(path);
 
-    return await openDatabase(
-      path,
-      version: MigrationRegistry.currentVersion,
-      password: password,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
+    try {
+      return await openDatabase(
+        path,
+        version: MigrationRegistry.currentVersion,
+        password: password,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      );
+    } catch (e) {
+      AppLogger.info('DatabaseHelper', 'Failed to open scanorder.db: $e — deleting and recreating');
+      // DB corrupt atau encryption key berubah, hapus dan buat ulang
+      // Data akan re-sync dari cloud saat login
+      try {
+        await deleteDatabase(path);
+      } catch (_) {}
+      return await openDatabase(
+        path,
+        version: MigrationRegistry.currentVersion,
+        password: password,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      );
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {

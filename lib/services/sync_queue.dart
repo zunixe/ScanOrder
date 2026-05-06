@@ -562,30 +562,64 @@ class SyncQueue {
     }
   }
 
+  Database? _cachedQueueDb;
+
   /// Get/create the queue database (encrypted)
   Future<Database> _getQueueDb() async {
+    if (_cachedQueueDb != null && _cachedQueueDb!.isOpen) return _cachedQueueDb!;
     final dbPath = await getDatabasesPath();
     final path = p.join(dbPath, 'sync_queue.db');
     final password = await SecureStorageService.getDbEncryptionKey() ?? '';
-    return openDatabase(
-      path,
-      version: 1,
-      password: password,
-      onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE sync_queue (
-            id TEXT PRIMARY KEY,
-            type INTEGER NOT NULL,
-            payload TEXT NOT NULL,
-            retry_count INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL,
-            next_retry_at INTEGER
-          )
-        ''');
-        await db.execute('CREATE INDEX idx_sync_queue_next_retry ON sync_queue(next_retry_at)');
-        await db.execute('CREATE INDEX idx_sync_queue_created ON sync_queue(created_at)');
-      },
-    );
+    try {
+      final db = await openDatabase(
+        path,
+        version: 1,
+        password: password,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE sync_queue (
+              id TEXT PRIMARY KEY,
+              type INTEGER NOT NULL,
+              payload TEXT NOT NULL,
+              retry_count INTEGER NOT NULL DEFAULT 0,
+              created_at INTEGER NOT NULL,
+              next_retry_at INTEGER
+            )
+          ''');
+          await db.execute('CREATE INDEX idx_sync_queue_next_retry ON sync_queue(next_retry_at)');
+          await db.execute('CREATE INDEX idx_sync_queue_created ON sync_queue(created_at)');
+        },
+      );
+      _cachedQueueDb = db;
+      return db;
+    } catch (e) {
+      AppLogger.info('SyncQueue', 'Failed to open sync_queue.db: $e — deleting and recreating');
+      // DB corrupt atau key berubah, hapus dan buat ulang
+      try {
+        await deleteDatabase(path);
+      } catch (_) {}
+      final db = await openDatabase(
+        path,
+        version: 1,
+        password: password,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE sync_queue (
+              id TEXT PRIMARY KEY,
+              type INTEGER NOT NULL,
+              payload TEXT NOT NULL,
+              retry_count INTEGER NOT NULL DEFAULT 0,
+              created_at INTEGER NOT NULL,
+              next_retry_at INTEGER
+            )
+          ''');
+          await db.execute('CREATE INDEX idx_sync_queue_next_retry ON sync_queue(next_retry_at)');
+          await db.execute('CREATE INDEX idx_sync_queue_created ON sync_queue(created_at)');
+        },
+      );
+      _cachedQueueDb = db;
+      return db;
+    }
   }
 
   Map<String, dynamic> _taskToDbMap(SyncTask task) => {
