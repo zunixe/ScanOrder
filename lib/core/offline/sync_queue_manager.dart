@@ -317,7 +317,7 @@ class SyncQueueManager {
         errorMessage: 'Max retries exceeded: ${error.toString()}',
         retryCount: newRetryCount,
       );
-      AppLogger.info('SyncQueueManager', 'Item ${item.id} permanently failed after ${newRetryCount} attempts');
+      AppLogger.info('SyncQueueManager', 'Item ${item.id} permanently failed after $newRetryCount attempts');
       return;
     }
 
@@ -332,7 +332,7 @@ class SyncQueueManager {
     );
 
     AppLogger.info(
-      'SyncQueueManager', 'Item ${item.id} failed (attempt ${newRetryCount}), will retry in ${nextDelay.inSeconds}s'
+      'SyncQueueManager', 'Item ${item.id} failed (attempt $newRetryCount), will retry in ${nextDelay.inSeconds}s'
     );
   }
 

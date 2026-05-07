@@ -120,6 +120,9 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  // Sentinel values so first _syncUserId always detects a change
+  String? _lastSyncedUserId = '<init>';
+  String? _lastSyncedTeamId = '<init>';
 
   final _pages = [
     const ScanPage(key: PageStorageKey('scan')),
@@ -170,17 +173,27 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final isAdmin = auth.isAdmin;
     final teamId = team?.id;
     final adminUserId = isAdmin ? null : team?.createdBy;
-    AppLogger.info('App', '_syncUserId: userId=$userId, teamId=$teamId, isAdmin=$isAdmin, adminUserId=$adminUserId');
+
+    // Skip refresh if nothing changed — prevents infinite loop from authStateChanges
+    final changed = userId != _lastSyncedUserId || teamId != _lastSyncedTeamId;
+    _lastSyncedUserId = userId;
+    _lastSyncedTeamId = teamId;
+
+    AppLogger.info('App', '_syncUserId: userId=$userId, teamId=$teamId, isAdmin=$isAdmin, adminUserId=$adminUserId, changed=$changed');
     // Set user context for crash reports
     MonitoringService.setUser(id: userId);
     context.read<HistoryProvider>().setUserId(userId);
     context.read<HistoryProvider>().setTeamContext(teamId, adminUserId);
-    context.read<HistoryProvider>().refresh();
     context.read<ScanProvider>().setTeamContext(teamId, adminUserId);
-    context.read<ScanProvider>().loadCounts();
     context.read<StatsProvider>().setTeamContext(teamId, adminUserId);
-    context.read<StatsProvider>().loadStats();
-    context.read<SubscriptionProvider>().loadStatus();
+
+    if (changed) {
+      context.read<HistoryProvider>().refresh();
+      context.read<ScanProvider>().loadCounts();
+      context.read<StatsProvider>().loadStats();
+      context.read<SubscriptionProvider>().loadStatus();
+    }
+
     // Repair scan_categories in Supabase for team users (admin has local data)
     if (teamId != null) {
       SupabaseService().repairScanCategories();
@@ -275,14 +288,5 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   void _selectPage(int i) {
     setState(() => _currentIndex = i);
-    if (i == 1) {
-      context.read<HistoryProvider>().refresh();
-    } else if (i == 2) {
-      context.read<StatsProvider>().loadStats();
-    } else if (i == 3) {
-      context.read<SubscriptionProvider>().loadStatus();
-    } else if (i == 4) {
-      context.read<SettingsProvider>().loadSettings();
-    }
   }
 }

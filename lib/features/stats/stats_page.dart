@@ -27,14 +27,25 @@ class _StatsPageState extends State<StatsPage> {
   @override
   void initState() {
     super.initState();
-    context.read<StatsProvider>().loadStats();
+    // StatsProvider.loadStats() is already called from _syncUserId in app.dart
+    // Just set team context here
+    final auth = context.read<AuthProvider>();
+    final teamId = auth.currentTeam?.id;
+    final adminUserId = auth.isAdmin ? null : auth.currentTeam?.createdBy;
+    context.read<StatsProvider>().setTeamContext(teamId, adminUserId);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reload stats when page becomes visible (e.g. after leaving team)
-    context.read<StatsProvider>().loadStats();
+    // Only reload if team context actually changed
+    final auth = context.read<AuthProvider>();
+    final teamId = auth.currentTeam?.id;
+    final adminUserId = auth.isAdmin ? null : auth.currentTeam?.createdBy;
+    final provider = context.read<StatsProvider>();
+    final needsRefresh = provider.teamId != teamId;
+    provider.setTeamContext(teamId, adminUserId);
+    if (needsRefresh) provider.loadStats();
   }
 
   @override

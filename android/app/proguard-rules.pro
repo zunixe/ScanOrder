@@ -14,6 +14,25 @@
 
 ## Supabase / GoTrue
 -keep class io.supabase.** { *; }
+-keep class com.supabase.** { *; }
+-keep class gotrue.** { *; }
+-keep class postgrest.** { *; }
+-keep class realtime.** { *; }
+-keep class storage.** { *; }
+-keep class functions.** { *; }
+-keep class kotlin.reflect.** { *; }
+-keepclassmembers class * {
+    @kotlin.reflect.KClass *;
+}
+-keepclassmembers class com.supabase.** {
+    *;
+}
+-dontwarn com.supabase.**
+-dontwarn gotrue.**
+-dontwarn postgrest.**
+-dontwarn realtime.**
+-dontwarn kotlinx.serialization.**
+-keep class kotlinx.serialization.** { *; }
 
 ## Google Sign-In
 -keep class com.google.android.gms.** { *; }

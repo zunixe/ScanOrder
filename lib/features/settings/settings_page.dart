@@ -1033,6 +1033,7 @@ class _SyncSectionState extends State<_SyncSection> {
               }
             },
           ),
+          if (const ['basic@gmail.com', 'pro@gmail.com', 'team@gmail.com'].contains(SupabaseService().currentUser?.email)) ...[
           const Divider(height: 32),
           ListTile(
             dense: true,
@@ -1108,6 +1109,7 @@ class _SyncSectionState extends State<_SyncSection> {
               }
             },
           ),
+          ],
         ],
       ],
     );

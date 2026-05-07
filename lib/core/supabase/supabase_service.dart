@@ -38,13 +38,6 @@ class SupabaseService {
       _isOffline = true;
       return;
     }
-    // Cek network reachability dulu supaya tidak crash di HP dengan network bermasalah
-    final reachable = await _checkReachability();
-    if (!reachable) {
-      AppLogger.info('Supabase', 'Host tidak bisa di-reach — mode offline aktif');
-      _isOffline = true;
-      return;
-    }
     try {
       await Supabase.initialize(
         url: _supabaseUrl,
@@ -55,16 +48,6 @@ class SupabaseService {
     } catch (e) {
       AppLogger.info('Supabase', 'Init error: $e');
       _isOffline = true;
-    }
-  }
-
-  Future<bool> _checkReachability() async {
-    try {
-      final uri = Uri.parse(_supabaseUrl);
-      final result = await InternetAddress.lookup(uri.host).timeout(const Duration(seconds: 5));
-      return result.isNotEmpty;
-    } catch (e) {
-      return false;
     }
   }
 

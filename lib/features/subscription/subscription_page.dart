@@ -66,7 +66,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
             body: AsyncStateBuilder<void>(
               state: provider.statusState,
               onRetry: () => provider.loadStatus(),
-              builder: (_, _s) => const SizedBox.shrink(),
+              builder: (_, s) => const SizedBox.shrink(),
             ),
           );
         }
