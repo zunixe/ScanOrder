@@ -139,38 +139,33 @@ jobs:
           path: build/app/outputs/flutter-apk/*.apk
 
   # ─── Build iOS ──────────────────────────────────────────────────────
-  build-ios:
-    name: Build iOS
-    needs: test
-    runs-on: macos-latest
-    timeout-minutes: 30
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Create .env from secrets
-        run: |
-          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
-          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
-          echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" >> .env
-
-      - name: Build iOS (no codesign)
-        run: flutter build ios --no-codesign --dart-define-from-file=.env
+  # build-ios:
+  #   name: Build iOS
+  #   needs: test
+  #   runs-on: macos-latest
+  #   timeout-minutes: 30
+  #   if: github.ref == 'refs/heads/main'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup Flutter
+  #       uses: subosito/flutter-action@v2
+  #       with:
+  #         flutter-version: ${{ env.FLUTTER_VERSION }}
+  #         channel: stable
+  #     - name: Install dependencies
+  #       run: flutter pub get
+  #     - name: Create .env from secrets
+  #       run: |
+  #         echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
+  #         echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
+  #         echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" >> .env
+  #     - name: Build iOS (no codesign)
+  #       run: flutter build ios --no-codesign --dart-define-from-file=.env
 
   # ─── Deploy to Play Store ───────────────────────────────────────────
   deploy:
     name: Deploy to Play Store
-    needs: [build-android, build-ios]
+    needs: [build-android]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: github.ref == 'refs/heads/main'
