@@ -108,13 +108,19 @@ jobs:
           echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
           echo "storeFile=keystore.jks" >> android/key.properties
 
+      - name: Create .env from secrets
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
+          echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" >> .env
+
       - name: Build APK (debug)
         if: github.ref == 'refs/heads/dev'
-        run: flutter build apk --debug --dart-define-from-file=.env.example
+        run: flutter build apk --debug --dart-define-from-file=.env
 
       - name: Build AAB (release)
         if: github.ref == 'refs/heads/main'
-        run: flutter build appbundle --release --dart-define-from-file=.env.example
+        run: flutter build appbundle --release --dart-define-from-file=.env
 
       - name: Upload AAB
         if: github.ref == 'refs/heads/main'
@@ -150,8 +156,14 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Create .env from secrets
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
+          echo "SENTRY_DSN=${{ secrets.SENTRY_DSN }}" >> .env
+
       - name: Build iOS (no codesign)
-        run: flutter build ios --no-codesign --dart-define-from-file=.env.example
+        run: flutter build ios --no-codesign --dart-define-from-file=.env
 
   # ─── Deploy to Play Store ───────────────────────────────────────────
   deploy:
