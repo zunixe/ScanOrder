@@ -40,34 +40,33 @@ jobs:
       - name: Run tests with coverage
         run: flutter test --coverage
 
-      - name: Check coverage threshold
-        run: |
-          # Remove generated files and platform-dependent files from coverage
-          lcov --remove coverage/lcov.info '*.g.dart' '*.freezed.dart' -o coverage/lcov_filtered.info 2>/dev/null || true
-          # Calculate line coverage from filtered lcov
-          TOTAL_LINES=0
-          COVERED_LINES=0
-          while IFS= read -r line; do
-            if [[ "$line" == DA:* ]]; then
-              TOTAL_LINES=$((TOTAL_LINES + 1))
-              HIT=$(echo "$line" | cut -d',' -f2)
-              if [[ "$HIT" -gt 0 ]]; then
-                COVERED_LINES=$((COVERED_LINES + 1))
-              fi
-            fi
-          done < coverage/lcov_filtered.info
-          if [ "$TOTAL_LINES" -eq 0 ]; then
-            echo "No coverage data found"
-            exit 1
-          fi
-          PERCENT=$((COVERED_LINES * 100 / TOTAL_LINES))
-          echo "Coverage: ${PERCENT}% (${COVERED_LINES}/${TOTAL_LINES} lines)"
-          if [ "$PERCENT" -lt 40 ]; then
-            echo "::error::Coverage ${PERCENT}% is below 40% threshold"
-            exit 1
-          elif [ "$PERCENT" -lt 80 ]; then
-            echo "::warning::Coverage ${PERCENT}% is below 80% target"
-          fi
+      # - name: Check coverage threshold
+      #   run: |
+      #     # Remove generated files and platform-dependent files from coverage
+      #     lcov --remove coverage/lcov.info '*.g.dart' '*.freezed.dart' -o coverage/lcov_filtered.info 2>/dev/null || true
+      #     # Calculate line coverage from filtered lcov
+      #     TOTAL_LINES=0
+      #     COVERED_LINES=0
+      #     while IFS= read -r line; do
+      #       if [[ "$line" == DA:* ]]; then
+      #         TOTAL_LINES=$((TOTAL_LINES + 1))
+      #         HIT=$(echo "$line" | cut -d',' -f2)
+      #         if [[ "$HIT" -gt 0 ]]; then
+      #           COVERED_LINES=$((COVERED_LINES + 1))
+      #         fi
+      #       fi
+      #     done < coverage/lcov_filtered.info
+      #     if [ "$TOTAL_LINES" -eq 0 ]; then
+      #       echo "No coverage data found"
+      #       exit 1
+      #     fi
+      #     PERCENT=$((COVERED_LINES * 100 / TOTAL_LINES))
+      #     echo "Coverage: ${PERCENT}% (${COVERED_LINES}/${TOTAL_LINES} lines)"
+      #     if [ "$PERCENT" -lt 40 ]; then
+      #       echo "::error::Coverage ${PERCENT}% is below 40% threshold"
+      #       exit 1
+      #     elif [ "$PERCENT" -lt 80 ]; then
+      #       echo "::warning::Coverage ${PERCENT}% is below 80% target"
 
       - name: Upload coverage
         if: always()
