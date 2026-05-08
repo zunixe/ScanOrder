@@ -42,6 +42,7 @@ class HistoryProvider extends ChangeNotifier {
   String? _teamId;
   String? _adminUserId;
   String? get teamId => _teamId;
+  bool _isLoading = false;
 
   void setUserId(String? userId) {
     _userId = userId;
@@ -156,9 +157,15 @@ class HistoryProvider extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    await loadDates();
-    await loadScans();
-    await loadCategories();
+    if (_isLoading) return;
+    _isLoading = true;
+    try {
+      await loadDates();
+      await loadScans();
+      await loadCategories();
+    } finally {
+      _isLoading = false;
+    }
   }
 
   Future<void> loadCategories() async {

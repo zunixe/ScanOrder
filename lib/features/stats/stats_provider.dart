@@ -55,6 +55,8 @@ class StatsProvider extends ChangeNotifier {
   String? _teamId;
   String? _adminUserId;
   String? get teamId => _teamId;
+  bool _isLoading = false;
+  bool _needsReload = false;
 
   void setTeamContext(String? teamId, String? adminUserId) {
     _teamId = teamId;
@@ -62,6 +64,11 @@ class StatsProvider extends ChangeNotifier {
   }
 
   Future<void> loadStats() async {
+    if (_isLoading) {
+      _needsReload = true;
+      return; // will reload after current load completes
+    }
+    _isLoading = true;
     statsState = const AsyncState.loading();
     notifyListeners();
     try {
@@ -93,6 +100,12 @@ class StatsProvider extends ChangeNotifier {
       AppLogger.info('Stats', 'loadStats error: $e');
       statsState = AsyncState.error(e.toString(), stackTrace: stack, retry: loadStats);
       notifyListeners();
+    } finally {
+      _isLoading = false;
+      if (_needsReload) {
+        _needsReload = false;
+        loadStats();
+      }
     }
   }
 

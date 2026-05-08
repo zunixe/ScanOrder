@@ -51,7 +51,6 @@ class AuthProvider extends ChangeNotifier {
       _supabase.authStateChanges.listen((state) async {
         _isLoggedIn = state.session != null;
         if (_isLoggedIn) {
-          notifyListeners();
           await _checkAdminPro();
           await _loadTeam();
           // Register session & start heartbeat for non-free users
@@ -69,12 +68,12 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  void _checkAuth() {
+  Future<void> _checkAuth() async {
     _isLoggedIn = _supabase.currentUser != null;
     notifyListeners();
     if (_isLoggedIn) {
       _checkAdminPro();
-      _loadTeam();
+      await _loadTeam();
     }
   }
 
