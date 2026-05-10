@@ -187,5 +187,5 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT }}
           packageName: com.scanorder.scanorder
           releaseFiles: app-release.aab
-          track: internal
+          tracks: internal
           status: completed
