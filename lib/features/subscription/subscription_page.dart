@@ -385,8 +385,7 @@ class _SubscriptionPageState extends State<SubscriptionPage> {
 
               const SizedBox(height: 24),
 
-              if (provider.purchaseError != null &&
-                  !provider.purchaseError!.contains('Produk tidak ditemukan')) ...[
+              if (provider.purchaseError != null) ...[
                 Card(
                   color: Colors.red.withAlpha(20),
                   child: Padding(

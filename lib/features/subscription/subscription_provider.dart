@@ -151,13 +151,12 @@ class SubscriptionProvider extends ChangeNotifier {
     if (!started) {
       final productId = _iap.productIdForTier(tier);
       if (notFoundProductIds.isNotEmpty) {
-        purchaseError = 'Produk tidak ditemukan: ${notFoundProductIds.join(', ')}. '
-            'Pastikan Product ID di Google Play Console sama dengan di app:\n'
-            '• Basic: scanorder_basic_monthly\n'
-            '• Pro: scanorder_pro_monthly\n'
-            '• Team: scanorder_team_monthly';
+        purchaseError = 'Produk tidak ditemukan: ${notFoundProductIds.join(', ')}.\n'
+            'App harus di-install dari Play Store (internal testing) agar langganan tersedia. '
+            'Debug build dari Android Studio tidak bisa mengakses produk Play Store.';
       } else {
-        purchaseError = 'Produk $productId belum tersedia. Cek Product ID di Google Play Console.';
+        purchaseError = 'Gagal memulai pembelian produk $productId. '
+            'Pastikan app di-install dari Play Store dan produk sudah aktif di Google Play Console.';
       }
       isPurchasing = false;
       notifyListeners();
