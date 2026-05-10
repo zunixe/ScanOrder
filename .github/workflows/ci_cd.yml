@@ -188,4 +188,4 @@ jobs:
           packageName: com.scanorder.scanorder
           releaseFiles: app-release.aab
           tracks: internal
-          status: completed
+          status: draft
