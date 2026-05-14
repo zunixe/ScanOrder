@@ -34,12 +34,13 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
-    // HistoryProvider.refresh() is already called from _syncUserId in app.dart
-    // Just set team context here
     final auth = context.read<AuthProvider>();
     final teamId = auth.currentTeam?.id;
     final adminUserId = auth.isAdmin ? null : auth.currentTeam?.createdBy;
-    context.read<HistoryProvider>().setTeamContext(teamId, adminUserId);
+    final provider = context.read<HistoryProvider>();
+    provider.setTeamContext(teamId, adminUserId);
+    // Always refresh when opening History so newly scanned items appear
+    provider.refresh();
   }
 
   @override
