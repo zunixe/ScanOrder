@@ -259,9 +259,13 @@ class _ScanPageState extends State<ScanPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  Text(
+                    'Sekarang: ${_formatTime(DateTime.now())}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
                   if (result.existingOrder != null)
                     Text(
-                      'Sudah discan: ${_formatTime(result.existingOrder!.scannedAt)}',
+                      'Sebelumnya: ${_formatTime(result.existingOrder!.scannedAt)}',
                       style: const TextStyle(fontSize: 11),
                     ),
                 ],
