@@ -686,7 +686,7 @@ class _OrderTileState extends State<_OrderTile> {
   @override
   Widget build(BuildContext context) {
     final color = AppTheme.getMarketplaceColor(order.marketplace);
-    final time = DateFormat('HH:mm').format(order.scannedAt);
+    final time = DateFormat('HH:mm:ss').format(order.scannedAt);
 
     return Dismissible(
       key: ValueKey(order.id),

@@ -417,7 +417,8 @@ class _ScanPageState extends State<ScanPage> {
   String _formatTime(DateTime dt) {
     final h = dt.hour.toString().padLeft(2, '0');
     final m = dt.minute.toString().padLeft(2, '0');
-    return '${dt.day}/${dt.month}/${dt.year} $h:$m';
+    final s = dt.second.toString().padLeft(2, '0');
+    return '${dt.day}/${dt.month}/${dt.year} $h:$m:$s';
   }
 
   Color _parseColor(String hex) {
