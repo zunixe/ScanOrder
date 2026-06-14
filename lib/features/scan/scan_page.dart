@@ -9,6 +9,7 @@ import 'package:vibration/vibration.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../features/auth/auth_provider.dart';
 import '../../models/category.dart';
@@ -238,6 +239,20 @@ class _ScanPageState extends State<ScanPage> {
 
       if (result.orderId != null) {
         await context.read<ScanProvider>().updateScanPhoto(result.orderId!, localFile.path);
+      }
+
+      if (mounted) {
+        final now = DateTime.now();
+        final time = DateFormat('HH:mm:ss').format(now);
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Resi ${result.resi} sudah tersimpan pukul $time'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     } catch (_) {}
   }
@@ -738,11 +753,13 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                       ],
                     ),
-                    Row(
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
+                            horizontal: 8,
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
@@ -758,21 +775,27 @@ class _ScanPageState extends State<ScanPage> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                         IconButton(
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          padding: EdgeInsets.zero,
                           onPressed: () {
                             setState(() => _focusResiMode = !_focusResiMode);
                           },
+                          iconSize: 20,
                           icon: Icon(
                             _focusResiMode ? Icons.center_focus_strong : Icons.center_focus_weak,
                             color: _focusResiMode ? Colors.lightGreenAccent : Colors.white70,
                           ),
                           tooltip: _focusResiMode ? 'Fokus Resi: ON' : 'Fokus Resi: OFF',
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 2),
                         // Manual photo toggle
                         Consumer<ScanProvider>(
                           builder: (_, provider, _) => IconButton(
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            padding: EdgeInsets.zero,
+                            iconSize: 20,
                             onPressed: () => provider.setManualPhoto(!provider.manualPhoto),
                             icon: Icon(
                               provider.manualPhoto ? Icons.camera_enhance : Icons.camera_enhance_outlined,
@@ -781,10 +804,13 @@ class _ScanPageState extends State<ScanPage> {
                             tooltip: provider.manualPhoto ? 'Foto Manual: ON' : 'Foto Manual: OFF',
                           ),
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 2),
                         // Photo save toggle
                         Consumer<ScanProvider>(
                           builder: (_, provider, _) => IconButton(
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            padding: EdgeInsets.zero,
+                            iconSize: 20,
                             onPressed: () => provider.setSavePhoto(!provider.savePhoto),
                             icon: Icon(
                               provider.savePhoto ? Icons.photo_camera : Icons.photo_camera_outlined,
@@ -793,8 +819,11 @@ class _ScanPageState extends State<ScanPage> {
                             tooltip: provider.savePhoto ? 'Foto: ON' : 'Foto: OFF',
                           ),
                         ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 2),
                         IconButton(
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          padding: EdgeInsets.zero,
+                          iconSize: 20,
                           onPressed: () {
                             setState(() => _isTorchOn = !_isTorchOn);
                             _controller?.toggleTorch();
@@ -805,6 +834,7 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                       ],
+                    ),
                     ),
                   ],
                 );
