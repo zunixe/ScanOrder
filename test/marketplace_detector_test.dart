@@ -87,7 +87,8 @@ void main() {
     test('Valid alphanumeric 8-30 chars', () => expect(MarketplaceDetector.isValidResi('ABCD12345678'), isTrue));
 
     test('Reject URL', () => expect(MarketplaceDetector.isValidResi('https://example.com'), isFalse));
-    test('Reject long pure numbers (Order ID)', () => expect(MarketplaceDetector.isValidResi('123456789012345'), isFalse));
+    test('Accept Tokopedia order number (15-20 digit) as valid resi', () => expect(MarketplaceDetector.isValidResi('123456789012345'), isTrue));
+    test('Accept real Tokopedia order number', () => expect(MarketplaceDetector.isValidResi('584512000485590691'), isTrue));
     test('Reject short pure numbers', () => expect(MarketplaceDetector.isValidResi('1234567'), isFalse));
     test('Reject empty', () => expect(MarketplaceDetector.isValidResi(''), isFalse));
     test('Reject too short', () => expect(MarketplaceDetector.isValidResi('AB'), isFalse));

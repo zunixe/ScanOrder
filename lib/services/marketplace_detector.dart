@@ -77,7 +77,7 @@ class MarketplaceDetector {
   }
 
   /// Cek apakah barcode adalah nomor resi yang valid
-  /// Menolak: Order ID (angka panjang 15-20 digit), URL, teks random
+  /// Menolak: URL, teks random. Terima: Tokopedia order number (15-20 digit).
   static bool isValidResi(String code) {
     final trimmed = code.trim();
     if (trimmed.isEmpty || trimmed.length < 4) return false;
@@ -85,15 +85,15 @@ class MarketplaceDetector {
     // Tolak URL
     if (trimmed.startsWith('http') || trimmed.contains('://')) return false;
 
+    // Terima jika cocok pattern resi yang dikenal (Termasuk Tokopedia order number)
+    final marketplace = detect(trimmed);
+    if (marketplace != 'Lainnya') return true;
+
     // Tolak angka murni pendek (< 8 digit, bukan resi)
     if (RegExp(r'^\d{1,7}$').hasMatch(trimmed)) return false;
 
-    // Tolak angka murni panjang (>= 15 digit, Order ID)
+    // Tolak angka murni panjang (>= 15 digit) untuk yang tidak dikenal
     if (RegExp(r'^\d{15,}$').hasMatch(trimmed)) return false;
-
-    // Terima jika cocok pattern resi yang dikenal
-    final marketplace = detect(trimmed);
-    if (marketplace != 'Lainnya') return true;
 
     // Untuk "Lainnya": terima hanya jika alfanumerik 8-30 karakter
     if (RegExp(r'^[A-Za-z0-9\-]{8,30}$').hasMatch(trimmed)) return true;

@@ -199,38 +199,12 @@ class _ScanPageState extends State<ScanPage> {
   }
 
   Future<void> _showManualPhotoDialog(ScanResult result) async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Ambil foto'),
-              subtitle: const Text('Arahkan kamera ke resi/paket'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Pilih dari galeri'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.skip_next),
-              title: const Text('Lewati'),
-              onTap: () => Navigator.pop(ctx, null),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (source == null || !mounted) return;
-
     try {
       final picker = ImagePicker();
-      final picked = await picker.pickImage(source: source, imageQuality: 85);
+      final picked = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
       if (picked == null || !mounted) return;
 
+      // Langsung save tanpa preview
       final dir = await getApplicationDocumentsDirectory();
       final fileName = 'manual_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final localFile = File('${dir.path}/$fileName');
@@ -721,6 +695,14 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                         Text(
+                          'Total: ${provider.totalCount}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: AppTheme.bodySize,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        Text(
                           'Hari ini: ${provider.todayCount} scan',
                           style: const TextStyle(
                             color: Colors.white70,
@@ -753,77 +735,57 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                       ],
                     ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Row(
+                    Flexible(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            'Total: ${provider.totalCount}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: AppTheme.captionSize,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
+                        const SizedBox(width: 2),
                         IconButton(
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                           padding: EdgeInsets.zero,
                           onPressed: () {
                             setState(() => _focusResiMode = !_focusResiMode);
                           },
-                          iconSize: 20,
+                          iconSize: 18,
                           icon: Icon(
                             _focusResiMode ? Icons.center_focus_strong : Icons.center_focus_weak,
                             color: _focusResiMode ? Colors.lightGreenAccent : Colors.white70,
                           ),
                           tooltip: _focusResiMode ? 'Fokus Resi: ON' : 'Fokus Resi: OFF',
                         ),
-                        const SizedBox(width: 2),
                         // Manual photo toggle
                         Consumer<ScanProvider>(
                           builder: (_, provider, _) => IconButton(
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                             padding: EdgeInsets.zero,
-                            iconSize: 20,
+                            iconSize: 18,
                             onPressed: () => provider.setManualPhoto(!provider.manualPhoto),
                             icon: Icon(
                               provider.manualPhoto ? Icons.camera_enhance : Icons.camera_enhance_outlined,
                               color: provider.manualPhoto ? Colors.orangeAccent : Colors.white70,
                             ),
-                            tooltip: provider.manualPhoto ? 'Foto Manual: ON' : 'Foto Manual: OFF',
+                            tooltip: provider.manualPhoto ? 'Foto Manual' : 'Foto Manual',
                           ),
                         ),
-                        const SizedBox(width: 2),
                         // Photo save toggle
                         Consumer<ScanProvider>(
                           builder: (_, provider, _) => IconButton(
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                             padding: EdgeInsets.zero,
-                            iconSize: 20,
+                            iconSize: 18,
                             onPressed: () => provider.setSavePhoto(!provider.savePhoto),
                             icon: Icon(
                               provider.savePhoto ? Icons.photo_camera : Icons.photo_camera_outlined,
                               color: provider.savePhoto ? Colors.white : Colors.white70,
                             ),
-                            tooltip: provider.savePhoto ? 'Foto: ON' : 'Foto: OFF',
+                            tooltip: provider.savePhoto ? 'Foto' : 'Foto',
                           ),
                         ),
-                        const SizedBox(width: 2),
                         IconButton(
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                           padding: EdgeInsets.zero,
-                          iconSize: 20,
+                          iconSize: 18,
                           onPressed: () {
                             setState(() => _isTorchOn = !_isTorchOn);
                             _controller?.toggleTorch();
@@ -834,6 +796,7 @@ class _ScanPageState extends State<ScanPage> {
                           ),
                         ),
                       ],
+                    ),
                     ),
                     ),
                   ],

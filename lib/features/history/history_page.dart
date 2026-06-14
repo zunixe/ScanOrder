@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:csv/csv.dart';
@@ -20,6 +19,7 @@ import '../auth/auth_provider.dart';
 import '../auth/login_dialog.dart';
 import '../settings/settings_provider.dart';
 import '../subscription/subscription_provider.dart';
+import '../scan/photo_preview_page.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
@@ -428,7 +428,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: provider.scans.length,
-                    itemBuilder: (_, i) => _OrderTile(order: provider.scans[i], isLatest: i == 0),
+                    itemBuilder: (_, i) => _OrderTile(order: provider.scans[i], isLatest: i == 0, scans: provider.scans, index: i),
                   ),
                 );
               },
@@ -511,7 +511,7 @@ class _HistoryPageState extends State<HistoryPage> {
                                 padding: const EdgeInsets.symmetric(horizontal: 12),
                                 itemCount: provider.filteredScans.length,
                                 itemBuilder: (_, i) =>
-                                    _OrderTile(order: provider.filteredScans[i], isLatest: i == 0),
+                                    _OrderTile(order: provider.filteredScans[i], isLatest: i == 0, scans: provider.filteredScans, index: i),
                               ),
                       ),
                     ],
@@ -579,7 +579,9 @@ class _HistoryPageState extends State<HistoryPage> {
 class _OrderTile extends StatefulWidget {
   final ScanRecord order;
   final bool isLatest;
-  const _OrderTile({required this.order, this.isLatest = false});
+  final List<ScanRecord> scans;
+  final int index;
+  const _OrderTile({required this.order, this.isLatest = false, this.scans = const [], this.index = 0});
 
   @override
   State<_OrderTile> createState() => _OrderTileState();
@@ -843,22 +845,10 @@ class _OrderTileState extends State<_OrderTile> {
               ),
             ],
           ),
-          onTap: () {
-            Clipboard.setData(ClipboardData(text: order.resi));
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Resi ${order.resi} disalin'),
-                duration: const Duration(seconds: 1),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          },
+          onTap: () => _showPhotoGallery(context),
           onLongPress: () {
-            if (_resolvedPhotoPath != null) {
-              _showPhotoDialog(context, _resolvedPhotoPath!);
-            } else if (order.photoPath != null && _resolvingPhoto) {
-              // Still downloading, show cloud version
-              _showPhotoDialog(context, order.photoPath!);
+            if (order.photoPath != null) {
+              _showPhotoGallery(context);
             } else {
               _showPhotoOptions(context);
             }
@@ -868,44 +858,17 @@ class _OrderTileState extends State<_OrderTile> {
     );
   }
 
-  void _showPhotoDialog(BuildContext context, String photoPath) {
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog.fullscreen(
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Foto Scan'),
-            leading: IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: () => Navigator.pop(ctx),
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.edit),
-                tooltip: 'Ganti foto',
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _pickNewPhoto(context);
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.download),
-                tooltip: 'Download',
-                onPressed: () => _downloadPhoto(ctx, photoPath),
-              ),
-            ],
-          ),
-          body: InteractiveViewer(
-            panEnabled: true,
-            boundaryMargin: const EdgeInsets.all(20),
-            minScale: 0.5,
-            maxScale: 4.0,
-            child: Center(
-              child: photoPath.startsWith('http')
-                  ? CachedNetworkImage(imageUrl: photoPath, fit: BoxFit.contain, placeholder: (_, u) => const Center(child: CircularProgressIndicator()), errorWidget: (_, u, e) => const Icon(Icons.broken_image, size: 64, color: Colors.grey))
-                  : Image.file(File(photoPath), fit: BoxFit.contain),
-            ),
-          ),
+  void _showPhotoGallery(BuildContext context) {
+    final scans = widget.scans;
+    final initialIndex = widget.index;
+    if (scans.isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PhotoPreviewPage(
+          scans: scans,
+          initialIndex: initialIndex,
         ),
       ),
     );
@@ -948,35 +911,6 @@ class _OrderTileState extends State<_OrderTile> {
         style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16),
       ),
     );
-  }
-
-  Future<void> _downloadPhoto(BuildContext context, String photoPath) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final fileName = 'scanorder_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final dest = File(p.join(dir.path, fileName));
-      if (photoPath.startsWith('http')) {
-        final response = await HttpClient().getUrl(Uri.parse(photoPath));
-        final httpResponse = await response.close();
-        if (httpResponse.statusCode == 200) {
-          await httpResponse.pipe(dest.openWrite());
-        } else {
-          throw Exception('HTTP ${httpResponse.statusCode}');
-        }
-      } else {
-        await File(photoPath).copy(dest.path);
-      }
-      await Share.shareXFiles(
-        [XFile(dest.path)],
-        text: 'Foto Scan Resi',
-      );
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal download: $e')),
-        );
-      }
-    }
   }
 
   void _showPhotoOptions(BuildContext context) {
