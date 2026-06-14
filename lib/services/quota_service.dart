@@ -76,6 +76,7 @@ class QuotaService {
   static const String _cycleAllowanceKey = 'subscription_cycle_allowance';
   static const String _cycleUsedKey = 'subscription_cycle_used';
   static const String _savePhotoKey = 'save_photo';
+  static const String _manualPhotoKey = 'manual_photo';
   static const int _cycleDays = 30;
 
   /// Prefix key dengan user_id agar data quota terpisah per user
@@ -284,6 +285,16 @@ class QuotaService {
   Future<void> setSavePhoto(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_userKey(_savePhotoKey), value);
+  }
+
+  Future<bool> getManualPhoto() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_userKey(_manualPhotoKey)) ?? false;
+  }
+
+  Future<void> setManualPhoto(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_userKey(_manualPhotoKey), value);
   }
 
   Future<StorageTier> getTier() async {

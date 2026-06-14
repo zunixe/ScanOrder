@@ -20,12 +20,14 @@ class ScanResult {
   final String resi;
   final String marketplace;
   final ScanRecord? existingOrder;
+  final int? orderId;
 
   ScanResult({
     required this.status,
     required this.resi,
     required this.marketplace,
     this.existingOrder,
+    this.orderId,
   });
 }
 
@@ -41,6 +43,7 @@ class ScanProvider extends ChangeNotifier {
   StorageTier currentTier = StorageTier.free;
   bool _processing = false;
   bool _savePhoto = true;
+  bool _manualPhoto = false;
   final Map<String, DateTime> _recentScans = {};
   static const Duration _recentRepeatWindow = Duration(seconds: 5);
 
@@ -97,6 +100,7 @@ class ScanProvider extends ChangeNotifier {
         totalCount = await _db.getTotalOrderCount(userId: userId);
       }
       _savePhoto = await _quota.getSavePhoto();
+      _manualPhoto = await _quota.getManualPhoto();
       currentTier = await _quota.getTier();
       if (_teamId == null) {
         scanLimit = await _quota.getScanLimit();
@@ -233,6 +237,14 @@ class ScanProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool get manualPhoto => _manualPhoto;
+
+  Future<void> setManualPhoto(bool value) async {
+    _manualPhoto = value;
+    await _quota.setManualPhoto(value);
+    notifyListeners();
+  }
+
   Future<ScanResult?> processScan(String rawCode, String? photoPath, {String? teamId}) async {
     if (_processing) return null;
     _processing = true;
@@ -281,11 +293,13 @@ class ScanProvider extends ChangeNotifier {
         // Dalam kategori: cek duplikat hanya di kategori itu
         final alreadyInCategory = await _db.isOrderInCategory(resi, activeCategoryId!, userId: userId);
         if (alreadyInCategory) {
+          final existing = await _db.findByResi(resi, userId: userId);
           SoundService().playScanDuplicate();
           lastResult = ScanResult(
             status: ScanStatus.duplicate,
             resi: resi,
             marketplace: marketplace,
+            existingOrder: existing,
           );
           AnalyticsService.scanDuplicate(resi);
           notifyListeners();
@@ -390,6 +404,7 @@ class ScanProvider extends ChangeNotifier {
         status: ScanStatus.success,
         resi: resi,
         marketplace: marketplace,
+        orderId: orderId,
       );
       AnalyticsService.scanComplete(marketplace, hasPhoto: photoPath != null);
       // Reset processing early so next scan isn't blocked
@@ -464,6 +479,10 @@ class ScanProvider extends ChangeNotifier {
   void clearResult() {
     lastResult = null;
     notifyListeners();
+  }
+
+  Future<void> updateScanPhoto(int id, String photoPath) async {
+    await _db.updateScanPhoto(id, photoPath);
   }
 
   /// Check if resi already exists in team scans on Supabase

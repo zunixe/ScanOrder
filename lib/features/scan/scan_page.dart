@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:vibration/vibration.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
 import '../../core/theme.dart';
 import '../../features/auth/auth_provider.dart';
 import '../../models/category.dart';
@@ -127,19 +128,18 @@ class _ScanPageState extends State<ScanPage> {
     final provider = context.read<ScanProvider>();
     final teamId = context.read<AuthProvider>().currentTeam?.id;
 
-    // Capture photo simultaneously during scan
+    // Capture photo simultaneously during scan (skip if manualPhoto enabled)
     String? photoPath;
-    if (provider.savePhoto && capture.image != null) {
+    if (provider.savePhoto && !provider.manualPhoto && capture.image != null) {
       try {
         final dir = await getApplicationDocumentsDirectory();
         final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
         final file = File('${dir.path}/$fileName');
         final compress = context.read<SettingsProvider>().compressPhoto;
         if (compress) {
-          // Compress: resize max 1280px, quality 85%
           final image = img.decodeImage(capture.image!);
           if (image != null) {
-            final resized = img.copyResize(image, width: compress ? 1280 : null, height: compress ? 1280 : null);
+            final resized = img.copyResize(image, width: 1280, height: 1280);
             final compressed = img.encodeJpg(resized, quality: 85);
             await file.writeAsBytes(compressed);
           } else {
@@ -159,14 +159,18 @@ class _ScanPageState extends State<ScanPage> {
 
     switch (result.status) {
       case ScanStatus.success:
-        // Green feedback - auto continue
         Vibration.vibrate(duration: 100);
         HapticFeedback.lightImpact();
         if (mounted) _showSuccessOverlay(result);
+
+        // Manual photo: prompt user after scan
+        if (provider.manualPhoto && provider.savePhoto && mounted) {
+          await Future.delayed(const Duration(milliseconds: 600));
+          if (mounted) _showManualPhotoDialog(result);
+        }
         break;
 
       case ScanStatus.duplicate:
-        // Red feedback - warning
         Vibration.vibrate(duration: 500, amplitude: 255);
         HapticFeedback.heavyImpact();
         if (mounted) _showDuplicateOverlay(result);
@@ -191,6 +195,51 @@ class _ScanPageState extends State<ScanPage> {
       case ScanStatus.idle:
         break;
     }
+  }
+
+  Future<void> _showManualPhotoDialog(ScanResult result) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Ambil foto'),
+              subtitle: const Text('Arahkan kamera ke resi/paket'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Pilih dari galeri'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.skip_next),
+              title: const Text('Lewati'),
+              onTap: () => Navigator.pop(ctx, null),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(source: source, imageQuality: 85);
+      if (picked == null || !mounted) return;
+
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = 'manual_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final localFile = File('${dir.path}/$fileName');
+      final bytes = await picked.readAsBytes();
+      await localFile.writeAsBytes(bytes);
+
+      if (result.orderId != null) {
+        await context.read<ScanProvider>().updateScanPhoto(result.orderId!, localFile.path);
+      }
+    } catch (_) {}
   }
 
   void _showSuccessOverlay(ScanResult result) {
@@ -719,6 +768,18 @@ class _ScanPageState extends State<ScanPage> {
                             color: _focusResiMode ? Colors.lightGreenAccent : Colors.white70,
                           ),
                           tooltip: _focusResiMode ? 'Fokus Resi: ON' : 'Fokus Resi: OFF',
+                        ),
+                        const SizedBox(width: 4),
+                        // Manual photo toggle
+                        Consumer<ScanProvider>(
+                          builder: (_, provider, _) => IconButton(
+                            onPressed: () => provider.setManualPhoto(!provider.manualPhoto),
+                            icon: Icon(
+                              provider.manualPhoto ? Icons.camera_enhance : Icons.camera_enhance_outlined,
+                              color: provider.manualPhoto ? Colors.orangeAccent : Colors.white70,
+                            ),
+                            tooltip: provider.manualPhoto ? 'Foto Manual: ON' : 'Foto Manual: OFF',
+                          ),
                         ),
                         const SizedBox(width: 4),
                         // Photo save toggle
