@@ -44,3 +44,6 @@ Icon?
 *~
 .flutter-plugins-dependencies
 coverage/
+fastlane/play-store-key.json
+fastlane/report.xml
+.playwright-mcp/
