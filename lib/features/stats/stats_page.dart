@@ -67,7 +67,7 @@ class _StatsPageState extends State<StatsPage> {
             return AsyncStateBuilder<void>(
               state: provider.statsState,
               onRetry: () => provider.loadStats(),
-              builder: (_, __) => const SizedBox.shrink(),
+              builder: (_, _) => const SizedBox.shrink(),
             );
           }
           return SingleChildScrollView(
@@ -370,15 +370,15 @@ class _StatsPageState extends State<StatsPage> {
                               children: [
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text('', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+                                  child: Text('', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                 ),
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text('Lokal', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
+                                  child: Text('Lokal', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
                                 ),
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text('Cloud', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Colors.grey[600]), textAlign: TextAlign.center),
+                                  child: Text('Cloud', style: TextStyle(fontSize: AppTheme.captionSize, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
                                 ),
                               ],
                             ),
@@ -859,13 +859,14 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   Widget _buildLockedSection(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Card(
-      color: Colors.grey[100],
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Icon(Icons.lock_outline, size: 48, color: Colors.grey[400]),
+            Icon(Icons.lock_outline, size: 48, color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
             const SizedBox(height: 12),
             const Text(
               'Statistik Lengkap',
@@ -875,7 +876,7 @@ class _StatsPageState extends State<StatsPage> {
             Text(
               'Upgrade ke Basic atau lebih tinggi untuk melihat grafik, penyimpanan, dan breakdown marketplace.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: AppTheme.bodySize, color: Colors.grey[600]),
+              style: TextStyle(fontSize: AppTheme.bodySize, color: cs.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -1457,7 +1458,7 @@ class _SyncRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: pct.clamp(0.0, 1.0),
-                  backgroundColor: Colors.grey[200],
+                  backgroundColor: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.15),
                   color: isWarning ? Colors.orange : AppTheme.successColor,
                   minHeight: 6,
                 ),

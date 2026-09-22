@@ -585,24 +585,17 @@ class QuotaService {
     final user = _supabase.currentUser;
     final cloud = await _supabase.fetchMySubscription();
 
-    // Jika tidak ada subscription by user_id, coba fetch by email (untuk Google login link)
+    // Jika tidak ada subscription by user_id, klaim via RPC SECURITY DEFINER
+    // (untuk Google login link — email terverifikasi OAuth di server)
     if (cloud == null && user?.email != null) {
-      AppLogger.info('QuotaService', 'No subscription by user_id, trying email...');
-      final cloudByEmail = await _supabase.fetchSubscriptionByEmail(user!.email!);
-      if (cloudByEmail != null) {
-        // Copy subscription ke user_id baru dan update email
-        await _supabase.upsertMySubscription({
-          'tier': cloudByEmail['tier'],
-          'active_from': cloudByEmail['active_from'],
-          'active_until': cloudByEmail['active_until'],
-          'cycle_allowance': cloudByEmail['cycle_allowance'],
-          'cycle_used': cloudByEmail['cycle_used'],
-        });
-        AppLogger.info('QuotaService', 'Subscription copied from email to new user_id');
-        // Fetch lagi sekarang sudah ada
+      AppLogger.info('QuotaService', 'No subscription by user_id, trying email claim RPC...');
+      await _supabase.claimSubscriptionByEmail();
+      final claimed = await _supabase.fetchMySubscription();
+      if (claimed != null) {
+        AppLogger.info('QuotaService', 'Subscription claimed from email to new user_id');
         return syncFromCloud();
       }
-      AppLogger.info('QuotaService', 'No subscription found in cloud for user ${user.id}');
+      AppLogger.info('QuotaService', 'No subscription found in cloud for user ${user?.id}');
       // Cloud tidak punya data → pastikan cycle lokal ter-init dengan benar
       await _ensureCycleInitialized();
       return;

@@ -32,9 +32,36 @@ android {
     defaultConfig {
         applicationId = "com.scanorder.scanorder"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    // Flavor distribusi: play (Google Play, app user) vs admin (build internal).
+    // Keduanya memakai keystore & konfigurasi signing yang SAMA.
+    //
+    // Flavor `play`: SATU-SATUNYA yang boleh diupload ke Google Play.
+    //   flutter build appbundle --release --flavor play --dart-define-from-file=.env
+    //
+    // Flavor `admin`: build internal (JANGAN pernah diupload store).
+    //   flutter build apk --release --flavor admin -t lib/main_admin.dart \
+    //     --dart-define-from-file=.env
+    // Entry Dart: -t lib/main_admin.dart. AppId beda supaya bisa
+    // ter-install berdampingan dengan app user di satu HP.
+    flavorDimensions += "store"
+    productFlavors {
+        create("play") {
+            dimension = "store"
+            applicationId = "com.scanorder.scanorder"
+            manifestPlaceholders["appName"] = "ScanOrder"
+        }
+        create("admin") {
+            dimension = "store"
+            applicationId = "com.scanorder.scanorder.admin"
+            versionNameSuffix = "-admin"
+            // Nama beda supaya gampang dibedakan di home screen.
+            manifestPlaceholders["appName"] = "ScanOrder Admin"
+        }
     }
 
     // Generate separate APKs per ABI instead of a single fat APK (release only)
@@ -48,16 +75,14 @@ android {
         }
     }
 
-    // Assign unique versionCode per ABI to allow multiple APKs on Play Store
-    // Formula: versionCode * 10 + abiCode (0=arm64, 1=armeabi, 2=x86_64)
-    val abiCodes = mapOf("arm64-v8a" to 0, "armeabi-v7a" to 1, "x86_64" to 2)
+    // versionCode = buildNumber langsung (naik +1 per rilis, MULAI rilis
+    // 1.0.5+23 → versionCode 23... dst). Rilis lama memakai formula lama
+    // buildNumber*10 (…210, 220, 230) sehingga masih di atas angka-angka ini.
+    // Setelah 230, urutan: 231, 232, 233, …
     androidComponents {
         onVariants { variant ->
             variant.outputs.forEach { output ->
-                val abi = output.filters.find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }?.identifier
-                val baseCode = flutter.versionCode.toInt()
-                val abiCode = abiCodes[abi] ?: 0
-                output.versionCode.set(baseCode * 10 + abiCode)
+                output.versionCode.set(flutter.versionCode.toInt())
             }
         }
     }

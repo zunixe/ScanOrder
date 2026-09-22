@@ -20,7 +20,6 @@ class MonitoringService {
       (options) {
         options.dsn = _sentryDsn;
         options.tracesSampleRate = 1.0; // 100% for dev, reduce for prod
-        options.profilesSampleRate = 1.0;
         options.environment = kDebugMode ? 'development' : 'production';
         options.attachStacktrace = true;
         options.sendDefaultPii = false; // don't send PII by default
@@ -40,12 +39,16 @@ class MonitoringService {
     Map<String, dynamic>? extra,
   }) async {
     if (!_isConfigured) return;
-    final event = SentryEvent(
-      level: SentryLevel.error,
-      message: context != null ? SentryMessage(context) : null,
-      extra: extra,
+    final hintData = <String, dynamic>{
+      ...?extra,
+    };
+    if (context != null) hintData['context'] = context;
+    final hint = hintData.isNotEmpty ? Hint.withMap(hintData) : null;
+    await Sentry.captureException(
+      exception,
+      stackTrace: stackTrace,
+      hint: hint,
     );
-    await Sentry.captureException(exception, stackTrace: stackTrace, hint: Hint.withMap({'event': event}));
   }
 
   /// Add user context to crash reports (without PII).

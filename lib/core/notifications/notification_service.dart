@@ -93,6 +93,72 @@ class NotificationService {
     );
   }
 
+  /// (Build admin) Notifikasi saat ada user baru mendaftar.
+  Future<void> showNewSignup({required String email}) async {
+    if (!_initialized) return;
+    const androidDetails = AndroidNotificationDetails(
+      'admin_approvals',
+      'Approval Pendaftaran',
+      channelDescription: 'Notifikasi pendaftar baru yang menunggu persetujuan',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const iosDetails = DarwinNotificationDetails();
+    const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    await _plugin.show(
+      10,
+      'Pendaftar Baru',
+      '$email menunggu persetujuan Anda.',
+      details,
+      payload: 'admin_new_signup',
+    );
+  }
+
+  /// (Build user) Notifikasi saat akun disetujui admin.
+  Future<void> showApproved() async {
+    if (!_initialized) return;
+    const androidDetails = AndroidNotificationDetails(
+      'account',
+      'Status Akun',
+      channelDescription: 'Notifikasi status persetujuan akun',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const iosDetails = DarwinNotificationDetails();
+    const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    await _plugin.show(
+      11,
+      'Akun Disetujui',
+      'Akun Anda telah disetujui admin. Selamat menggunakan ScanOrder!',
+      details,
+      payload: 'account_approved',
+    );
+  }
+
+  /// Notifikasi generik dari server (mis. anggota tim baru bergabung).
+  Future<void> showAppNotification({required String title, String? body}) async {
+    if (!_initialized) return;
+    const androidDetails = AndroidNotificationDetails(
+      'app',
+      'Notifikasi Aplikasi',
+      channelDescription: 'Notifikasi aktivitas tim dan akun',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const iosDetails = DarwinNotificationDetails();
+    const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
+
+    await _plugin.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000 % 100000,
+      title,
+      body,
+      details,
+      payload: 'app_notification',
+    );
+  }
+
   Future<void> cancelAll() async {
     await _plugin.cancelAll();
   }

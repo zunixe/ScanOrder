@@ -32,7 +32,7 @@ class SyncStatusWidget extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: _getStatusColor(status).withOpacity(0.1),
+            color: _getStatusColor(status).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -274,38 +274,32 @@ class _ConflictResolutionDialogState extends State<ConflictResolutionDialog> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        RadioListTile<ConflictResolutionOption>(
-          title: const Text('Gunakan Data Lokal'),
-          subtitle: const Text('Data dari perangkat Anda akan menggantikan data server'),
-          value: ConflictResolutionOption.local,
+        RadioGroup<ConflictResolutionOption>(
           groupValue: _selectedOption,
           onChanged: (value) {
             setState(() {
               _selectedOption = value!;
             });
           },
-        ),
-        RadioListTile<ConflictResolutionOption>(
-          title: const Text('Gunakan Data Server'),
-          subtitle: const Text('Data dari server akan menggantikan data lokal'),
-          value: ConflictResolutionOption.server,
-          groupValue: _selectedOption,
-          onChanged: (value) {
-            setState(() {
-              _selectedOption = value!;
-            });
-          },
-        ),
-        RadioListTile<ConflictResolutionOption>(
-          title: const Text('Gabungkan Secara Manual'),
-          subtitle: const Text('Edit data sebelum menyimpan'),
-          value: ConflictResolutionOption.merge,
-          groupValue: _selectedOption,
-          onChanged: (value) {
-            setState(() {
-              _selectedOption = value!;
-            });
-          },
+          child: Column(
+            children: [
+              RadioListTile<ConflictResolutionOption>(
+                title: const Text('Gunakan Data Lokal'),
+                subtitle: const Text('Data dari perangkat Anda akan menggantikan data server'),
+                value: ConflictResolutionOption.local,
+              ),
+              RadioListTile<ConflictResolutionOption>(
+                title: const Text('Gunakan Data Server'),
+                subtitle: const Text('Data dari server akan menggantikan data lokal'),
+                value: ConflictResolutionOption.server,
+              ),
+              RadioListTile<ConflictResolutionOption>(
+                title: const Text('Gabungkan Secara Manual'),
+                subtitle: const Text('Edit data sebelum menyimpan'),
+                value: ConflictResolutionOption.merge,
+              ),
+            ],
+          ),
         ),
       ],
     );

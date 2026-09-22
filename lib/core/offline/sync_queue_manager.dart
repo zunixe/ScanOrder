@@ -25,10 +25,7 @@ class SyncQueueManager {
   Stream<SyncQueueStatus> get syncStatusStream => _syncStatusController.stream;
   Stream<SyncItemProgress> get itemProgressStream => _itemProgressController.stream;
   
-  SyncQueueStatus _currentStatus = SyncQueueStatus.idle;
-  
   set _status(SyncQueueStatus status) {
-    _currentStatus = status;
     _syncStatusController.add(status);
   }
 
@@ -288,15 +285,6 @@ class SyncQueueManager {
 
     // Simulate network delay for demo
     await Future.delayed(const Duration(milliseconds: 100));
-  }
-
-  /// Check if there's a conflict between local and server data
-  bool _hasConflict(Map<String, dynamic> serverData, SyncQueueItem item) {
-    final serverVersion = serverData['version'] as int? ?? 0;
-    final localVersion = item.localVersion ?? 0;
-    
-    // If server version is newer than what we have, there might be a conflict
-    return serverVersion > localVersion;
   }
 
   /// Handle sync failure with exponential backoff

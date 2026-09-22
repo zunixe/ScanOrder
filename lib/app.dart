@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'core/theme.dart';
+import 'core/admin_gate.dart';
 import 'core/supabase/supabase_service.dart';
 import 'core/l10n/app_localizations.dart';
 import 'core/monitoring/monitoring_service.dart';
@@ -19,6 +20,7 @@ import 'features/settings/settings_provider.dart';
 import 'features/auth/auth_provider.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/splash/onboarding_screen.dart';
+import 'services/sync_queue.dart';
 
 class ScanOrderApp extends StatelessWidget {
   const ScanOrderApp({super.key});
@@ -41,9 +43,13 @@ class ScanOrderApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+
+        // Provider tambahan khusus build admin (kosong pada build user).
+        // Diisi oleh lib/admin/admin_wiring.dart via main_admin.dart.
+        ...AdminGate.extraProviders,
       ],
       child: Consumer2<SettingsProvider, AuthProvider>(
-        builder: (_, settings, auth, __) {
+        builder: (_, settings, auth, _) {
           final locale = auth.currentLocale != null 
               ? Locale(auth.currentLocale!) 
               : const Locale('id');
@@ -186,6 +192,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     context.read<HistoryProvider>().setTeamContext(teamId, adminUserId);
     context.read<ScanProvider>().setTeamContext(teamId, adminUserId);
     context.read<StatsProvider>().setTeamContext(teamId, adminUserId);
+    // SyncQueue perlu tahu tim aktif untuk mendrop task milik tim lama
+    SyncQueue().setTeamContext(teamId);
 
     if (changed) {
       context.read<HistoryProvider>().refresh();

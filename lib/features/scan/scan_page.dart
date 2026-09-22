@@ -128,6 +128,7 @@ class _ScanPageState extends State<ScanPage> {
   Future<void> _handleScan(String code, BarcodeCapture capture) async {
     final provider = context.read<ScanProvider>();
     final teamId = context.read<AuthProvider>().currentTeam?.id;
+    final compress = context.read<SettingsProvider>().compressPhoto;
 
     // Capture photo simultaneously during scan (skip if manualPhoto enabled)
     String? photoPath;
@@ -136,7 +137,6 @@ class _ScanPageState extends State<ScanPage> {
         final dir = await getApplicationDocumentsDirectory();
         final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
         final file = File('${dir.path}/$fileName');
-        final compress = context.read<SettingsProvider>().compressPhoto;
         if (compress) {
           final image = img.decodeImage(capture.image!);
           if (image != null) {
@@ -156,13 +156,25 @@ class _ScanPageState extends State<ScanPage> {
     }
 
     final result = await provider.processScan(code, photoPath, teamId: teamId);
-    if (result == null) return;
+    if (result == null || !mounted) return;
 
     switch (result.status) {
       case ScanStatus.success:
         Vibration.vibrate(duration: 100);
         HapticFeedback.lightImpact();
         if (mounted) _showSuccessOverlay(result);
+
+        // Cloud duplicate check failed (offline) — warn user
+        if (provider.cloudCheckFailed && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Offline: resi tidak terverifikasi ke cloud, bisa duplikat di device lain'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
 
         // Manual photo: prompt user after scan
         if (provider.manualPhoto && provider.savePhoto && mounted) {
@@ -211,6 +223,7 @@ class _ScanPageState extends State<ScanPage> {
       final bytes = await picked.readAsBytes();
       await localFile.writeAsBytes(bytes);
 
+      if (!mounted) return;
       if (result.orderId != null) {
         await context.read<ScanProvider>().updateScanPhoto(result.orderId!, localFile.path);
       }

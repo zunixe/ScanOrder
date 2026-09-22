@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart' as pinfo;
 import '../../core/theme.dart';
+import '../../core/admin_gate.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../core/db/database_helper.dart';
 import '../../core/backup/backup_service.dart';
@@ -12,6 +13,7 @@ import '../../services/quota_service.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../services/sync_queue.dart';
 import '../auth/auth_provider.dart';
+import '../../models/team.dart';
 import '../auth/login_dialog.dart';
 import '../contact/contact_page.dart';
 import '../history/history_provider.dart';
@@ -54,7 +56,6 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(title: const Text('Pengaturan')),
       body: Consumer2<AuthProvider, SubscriptionProvider>(
         builder: (_, auth, sub, _) {
-          final isTeam = sub.currentTier == StorageTier.unlimited;
           return ListView(
             children: [
               // ── 1. Profil User ──
@@ -63,7 +64,29 @@ class _SettingsPageState extends State<SettingsPage> {
 
               // ── 2. Kelola Team ──
               if (auth.isLoggedIn) ...[
-                _TeamSection(auth: auth, isTeamAdmin: isTeam),
+                // isTeamAdmin = role admin di tim saat ini (bukan sekadar tier)
+                _TeamSection(auth: auth, isTeamAdmin: auth.isAdmin),
+                const Divider(height: 1),
+              ],
+
+              // ── 2b. Admin Panel ──
+              // Hanya tampil pada build admin (flavor admin) DAN login
+              // sebagai super admin. Build user tidak pernah punya tile ini.
+              if (AdminGate.enabled &&
+                  AdminGate.isSuperAdmin(
+                      SupabaseService().currentUser?.email)) ...[
+                ListTile(
+                  dense: true,
+                  contentPadding: _settingsTilePadding,
+                  leading: const Icon(Icons.admin_panel_settings_outlined),
+                  title: const Text('Admin Panel', style: _settingsTitleStyle),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => AdminGate.panelBuilder!(context)),
+                  ),
+                ),
                 const Divider(height: 1),
               ],
 
@@ -474,6 +497,24 @@ class _TeamSection extends StatelessWidget {
             ),
             title: Text(member.email ?? member.userId, style: _settingsTitleStyle),
             subtitle: Text(member.role == 'admin' ? 'Admin' : 'Anggota', style: _settingsSubtitleStyle),
+            // Admin tim: kick member lain / transfer admin
+            trailing: (isTeamAdmin && member.role != 'admin')
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.swap_horiz, size: 20),
+                        tooltip: 'Jadikan admin',
+                        onPressed: () => _showTransferAdminDialog(context, auth, member),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.person_remove_outlined, size: 20, color: Colors.red),
+                        tooltip: 'Keluarkan dari tim',
+                        onPressed: () => _showKickMemberDialog(context, auth, member),
+                      ),
+                    ],
+                  )
+                : null,
           )),
           // Keluar tim
           Padding(
@@ -505,6 +546,56 @@ class _TeamSection extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+
+  void _showKickMemberDialog(BuildContext context, AuthProvider auth, TeamMember member) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Keluarkan Anggota?'),
+        content: Text('${member.email ?? member.userId} akan dikeluarkan dari tim "${auth.currentTeam?.name ?? ''}".'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await auth.kickMember(member.userId);
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(auth.error ?? 'Anggota dikeluarkan')),
+              );
+            },
+            child: const Text('Keluarkan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTransferAdminDialog(BuildContext context, AuthProvider auth, TeamMember member) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Jadikan Admin?'),
+        content: Text(
+            '${member.email ?? member.userId} akan menjadi admin tim dan kamu menjadi anggota biasa. Lanjutkan?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await auth.transferAdminTo(member.userId);
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(auth.error ?? 'Admin ditransfer')),
+              );
+            },
+            child: const Text('Transfer'),
+          ),
+        ],
+      ),
     );
   }
 

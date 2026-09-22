@@ -4,7 +4,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/db/database_helper.dart';
+import '../../core/notifications/notification_service.dart';
 import '../../core/state/async_state.dart';
 import '../../core/supabase/supabase_service.dart';
 import '../../core/monitoring/analytics_service.dart';
@@ -12,6 +15,7 @@ import '../../core/monitoring/monitoring_service.dart';
 import '../../models/scan_record.dart';
 import '../../models/team.dart';
 import '../../services/quota_service.dart';
+import '../../services/sync_queue.dart';
 import '../settings/settings_provider.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -34,6 +38,9 @@ class AuthProvider extends ChangeNotifier {
   Timer? _heartbeatTimer;
   static const Duration _heartbeatInterval = Duration(minutes: 5);
 
+  // Realtime notifikasi in-app (mis. anggota tim baru)
+  RealtimeChannel? _notifChannel;
+
   bool get isLoggedIn => _isLoggedIn;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -51,8 +58,18 @@ class AuthProvider extends ChangeNotifier {
       _supabase.authStateChanges.listen((state) async {
         _isLoggedIn = state.session != null;
         if (_isLoggedIn) {
+          // Gate approval: user baru harus disetujui admin dulu
+          final approved = await _checkApprovalGate();
+          if (!approved) {
+            notifyListeners();
+            return;
+          }
           await _checkAdminPro();
           await _loadTeam();
+          // Beri tahu SyncQueue tim aktif (untuk drop task tim lama)
+          SyncQueue().setTeamContext(_currentTeam?.id);
+          // Realtime: notifikasi in-app utk user ini (anggota tim baru, dll.)
+          _startNotificationListener();
           // Register session & start heartbeat for non-free users
           await _registerSessionIfNeeded();
           _startHeartbeat();
@@ -68,12 +85,128 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Cek status approval user yang baru login.
+  /// - pending/rejected → auto signOut + pesan, return false
+  /// - approved ATAU pertama kali login setelah approve → notifikasi + true
+  Future<bool> _checkApprovalGate() async {
+    final user = _supabase.currentUser;
+    if (user == null) return false;
+
+    // Super admin tidak perlu approval
+    final email = user.email?.toLowerCase();
+    if (email != null && email == 'zunixe@gmail.com') return true;
+
+    try {
+      final status = await _supabase.getMyApprovalStatus();
+      // null = tidak ada baris (offline/RPC gagal) → jangan blokir
+      if (status == null) return true;
+
+      if (status == 'pending') {
+        _error = 'Akun Anda masih menunggu persetujuan admin. '
+            'Anda akan diberi tahu setelah disetujui.';
+        await _forceSignOut();
+        return false;
+      }
+      if (status == 'rejected') {
+        _error = 'Pendaftaran akun Anda tidak disetujui. Hubungi admin.';
+        await _forceSignOut();
+        return false;
+      }
+
+      // status == 'approved' — tampilkan notifikasi sekali
+      await _notifyApprovedOnce(user.id);
+      return true;
+    } catch (e) {
+      AppLogger.info('AuthProvider', 'checkApprovalGate error: $e');
+      return true; // fail-open agar tidak mengunci user karena error
+    }
+  }
+
+  Future<void> _forceSignOut() async {
+    try {
+      await _supabase.clearSession();
+      await _supabase.signOut();
+    } catch (_) {}
+    _isLoggedIn = false;
+    _currentTeam = null;
+    _stopTimers();
+    _stopNotificationListener();
+    // Bersihkan notifikasi sesi lama
+    await NotificationService().cancelAll();
+  }
+
+  /// Notifikasi "akun disetujui" hanya sekali per user (local flag).
+  Future<void> _notifyApprovedOnce(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'approved_notified_$userId';
+      if (prefs.getBool(key) != true) {
+        await NotificationService().showApproved();
+        await prefs.setBool(key, true);
+      }
+    } catch (e) {
+      AppLogger.info('AuthProvider', 'notifyApprovedOnce error: $e');
+    }
+  }
+
+  /// Subscribe realtime INSERT notifications milik user ini.
+  /// Server mengisi tabel notifications (mis. anggota tim baru bergabung)
+  /// → device menerima push dan menampilkan notifikasi lokal.
+  void _startNotificationListener() {
+    if (_notifChannel != null) return;
+    final client = _supabase.client;
+    final user = _supabase.currentUser;
+    if (client == null || user == null) return;
+    try {
+      _notifChannel = client
+          .channel('user-notifications')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'notifications',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'user_id',
+              value: user.id,
+            ),
+            callback: (payload) {
+              final row = payload.newRecord;
+              // Hanya proses notifikasi milik user ini
+              if (row['user_id'] != user.id) return;
+              NotificationService().showAppNotification(
+                title: row['title'] as String? ?? 'Notifikasi',
+                body: row['body'] as String?,
+              );
+            },
+          )
+          .subscribe();
+      AppLogger.info('AuthProvider', 'notification listener started for ${user.id}');
+    } catch (e) {
+      AppLogger.info('AuthProvider', 'startNotificationListener error: $e');
+    }
+  }
+
+  void _stopNotificationListener() {
+    try {
+      _notifChannel?.unsubscribe();
+    } catch (_) {}
+    _notifChannel = null;
+  }
+
   Future<void> _checkAuth() async {
     _isLoggedIn = _supabase.currentUser != null;
     notifyListeners();
     if (_isLoggedIn) {
+      final approved = await _checkApprovalGate();
+      if (!approved) {
+        notifyListeners();
+        return;
+      }
       _checkAdminPro();
       await _loadTeam();
+      // Cold-start: set konteks tim SEBELUM SyncQueue memproses task lama,
+      // kalau tidak task personal terhapus karena team_id ≠ null-context
+      SyncQueue().setTeamContext(_currentTeam?.id);
     }
   }
 
@@ -122,16 +255,44 @@ class AuthProvider extends ChangeNotifier {
       final team = await _supabase.createTeam(name);
       if (team != null) {
         _currentTeam = team;
+        _teamMembers = await _loadMembersSafe(team.id);
         AnalyticsService.teamCreate();
       } else {
         _error = 'Gagal membuat team';
       }
     } catch (e) {
-      _error = 'Error: $e';
+      // Pesan error server (tier tidak cukup, sudah punya tim, dll.)
+      _error = _friendlyError(e);
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<List<TeamMember>> _loadMembersSafe(String teamId) async {
+    try {
+      final members = await _supabase.getTeamMembers(teamId);
+      return members.map((m) => TeamMember.fromMap(m)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Konversi exception server ke pesan Indonesia yang bisa dipahami user.
+  static String _friendlyError(Object e) {
+    final raw = e.toString();
+    // 1) PostgrestException dari RPC (RAISE EXCEPTION server) — kick/transfer
+    //    melempar PostgrestException MENTAH (tanpa prefix "Exception: ").
+    //    Format toString(): "PostgrestException(message: X, code: P0001, ...)"
+    final rpc = RegExp(r'message: (.+?), code:').firstMatch(raw)?.group(1)?.trim();
+    if (rpc != null && rpc.isNotEmpty) return rpc;
+    // 2) Exception() biasa dengan pesan ("Exception: <pesan>")
+    final match = RegExp(r'Exception: (.+)').firstMatch(raw);
+    final inner = match?.group(1)?.trim();
+    if (inner != null && inner.isNotEmpty && !inner.startsWith('PostgrestException')) {
+      return inner;
+    }
+    return 'Terjadi kesalahan. Coba lagi.';
   }
 
   Future<void> joinTeam(String inviteCode) async {
@@ -159,7 +320,8 @@ class AuthProvider extends ChangeNotifier {
         _error = 'Kode invite tidak valid';
       }
     } catch (e) {
-      _error = 'Error: $e';
+      // Blokir server (tier, tim penuh) → tampilkan pesannya
+      _error = _friendlyError(e);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -188,8 +350,8 @@ class AuthProvider extends ChangeNotifier {
           return;
         }
       } else {
-        // Regular member leaving
-        final ok = await _supabase.leaveTeam();
+        // Regular member leaving — scoped ke tim ini saja
+        final ok = await _supabase.leaveTeam(_currentTeam!.id);
         if (!ok) {
           _error = 'Gagal keluar dari tim';
           _isLoading = false;
@@ -201,8 +363,51 @@ class AuthProvider extends ChangeNotifier {
       _teamMembers = [];
       // Clear team data from local DB, keep personal data
       await _clearTeamDataLocally();
+      // Drop task sync milik tim lama — kalau tidak, task gagal terus
+      // dan memunculkan notifikasi sync error berulang (bug lama)
+      SyncQueue().setTeamContext(null);
     } catch (e) {
       _error = 'Error: $e';
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// (Admin) Keluarkan anggota dari tim. Server memverifikasi role admin.
+  Future<void> kickMember(String userId) async {
+    if (_currentTeam == null) return;
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      await _supabase.kickMember(_currentTeam!.id, userId);
+      _teamMembers = _teamMembers.where((m) => m.userId != userId).toList();
+      AnalyticsService.teamJoin(); // analytics kick ≈ perubahan member
+    } catch (e) {
+      _error = _friendlyError(e);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// (Admin) Transfer role admin ke anggota lain. Admin lama tetap member.
+  Future<void> transferAdminTo(String userId) async {
+    if (_currentTeam == null) return;
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final ok = await _supabase.transferAdmin(_currentTeam!.id, userId);
+      if (ok) {
+        // Refresh state lokal: role berubah + admin baru
+        await _loadTeam();
+      } else {
+        _error = 'Gagal transfer admin';
+      }
+    } catch (e) {
+      _error = _friendlyError(e);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -262,6 +467,9 @@ class AuthProvider extends ChangeNotifier {
       );
       AnalyticsService.login('email_signup');
       _isLoggedIn = true;
+      // Gate approval: user baru harus disetujui admin
+      final approved = await _checkApprovalGate();
+      if (!approved) return;
       // Apply tier yang dipilih saat daftar
       if (tier != StorageTier.free) {
         await QuotaService().purchaseOrChangeTier(tier, carryOver: false);
@@ -297,6 +505,9 @@ class AuthProvider extends ChangeNotifier {
       );
       AnalyticsService.login('email_signin');
       _isLoggedIn = true;
+      // Gate approval: cek sebelum register session
+      final approved = await _checkApprovalGate();
+      if (!approved) return;
       // Register session after successful login
       await _registerSessionIfNeeded();
       _startHeartbeat();
@@ -334,11 +545,17 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     _stopTimers();
     try {
+      // Reset notifikasi lama — jangan bawa notifikasi akun sebelumnya
+      // ke sesi akun berikutnya (bug lama: notifikasi nyangkut setelah logout)
+      await NotificationService().cancelAll();
       await _supabase.clearSession();
       await _supabase.signOut();
       await QuotaService().purchaseOrChangeTier(StorageTier.free, carryOver: false);
       _isLoggedIn = false;
       _currentTeam = null;
+      // Reset konteks tim SyncQueue agar task tim tidak diproses saat logout
+      SyncQueue().setTeamContext(null);
+      _stopNotificationListener();
       AnalyticsService.logout();
       MonitoringService.setUser(id: null);
     } finally {
@@ -352,6 +569,9 @@ class AuthProvider extends ChangeNotifier {
     _stopTimers();
     _isLoggedIn = false;
     _currentTeam = null;
+    _stopNotificationListener();
+    // Bersihkan notifikasi akun lama
+    await NotificationService().cancelAll();
     // Silent logout — no error message, just sign out
     try {
       await _supabase.signOut();

@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/scan_record.dart';
 import '../../models/category.dart';
@@ -150,11 +152,74 @@ class SupabaseService {
     }
   }
 
-  /// Login dengan Google OAuth (browser redirect)
-  /// Secara otomatis link ke akun yang ada jika email sama
+  /// Login dengan Google.
+  ///
+  /// Android: NATIVE — dialog pilih akun Google bawaan Android, TANPA browser.
+  /// ID token ditukar ke Supabase via signInWithIdToken (audience divalidasi
+  /// terhadap client ID Supabase, jadi serverClientId = Web Client ID Supabase).
+  ///
+  /// Platform lain (iOS/Web) atau jika native gagal: fallback ke OAuth browser.
+  /// Secara otomatis link ke akun yang ada jika email sama.
+  static const String _googleWebClientId =
+      String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+
   Future<bool> signInWithGoogle() async {
     final client = _client;
     if (client == null) return false;
+
+    // ── Native flow (Android) ──
+    if (!kIsWeb && Platform.isAndroid && _googleWebClientId.isNotEmpty) {
+      try {
+        // ignore: avoid_print
+        print('[GOOGLE] native flow start, serverClientId=$_googleWebClientId');
+        final google = GoogleSignIn(serverClientId: _googleWebClientId);
+        // Bersihkan akun cached agar picker selalu muncul (pola ChatYuk)
+        try {
+          await google.signOut();
+        } catch (_) {}
+        final account = await google.signIn();
+        if (account == null) {
+          // User menutup dialog pilih akun — JANGAN fallback ke browser
+          // ignore: avoid_print
+          print('[GOOGLE] user membatalkan dialog native');
+          AppLogger.info('Supabase', 'Google sign-in dibatalkan user');
+          return false;
+        }
+        final auth = await account.authentication;
+        final idToken = auth.idToken;
+        // ignore: avoid_print
+        print('[GOOGLE] native ok, email=${account.email}, idTokenLen=${idToken?.length ?? 0}');
+        if (idToken == null) {
+          // ignore: avoid_print
+          print('[GOOGLE] idToken KOSONG — fallback OAuth web');
+          AppLogger.info('Supabase', 'Google idToken kosong — fallback OAuth web');
+        } else {
+          await client.auth.signInWithIdToken(
+            provider: OAuthProvider.google,
+            idToken: idToken,
+            accessToken: auth.accessToken,
+          );
+          // ignore: avoid_print
+          print('[GOOGLE] signInWithIdToken OK (native, tanpa browser)');
+          AppLogger.info('Supabase', 'Google native sign-in OK (tanpa browser)');
+          return true;
+        }
+      } catch (e, st) {
+        // Biasanya ApiException 10 = Android OAuth client (SHA-1/package)
+        // belum terdaftar / propagasi belum selesai → fallback agar login
+        // tetap jalan. Log penuh ke logcat (print tampil di release juga).
+        // ignore: avoid_print
+        print('[GOOGLE] native sign-in GAGAL: $e');
+        // ignore: avoid_print
+        print('[GOOGLE] stack: $st');
+        AppLogger.info('Supabase', 'Google native sign-in gagal: $e — fallback OAuth web');
+      }
+    } else {
+      // ignore: avoid_print
+      print('[GOOGLE] native SKIP (isAndroid=${!kIsWeb && Platform.isAndroid}, webClientIdSet=${_googleWebClientId.isNotEmpty})');
+    }
+
+    // ── Fallback: OAuth browser (iOS/Web/native gagal) ──
     try {
       await client.auth.signInWithOAuth(
         OAuthProvider.google,
@@ -217,32 +282,25 @@ class SupabaseService {
 
   // ---- Team Management ----
 
-  /// Buat team baru untuk user yang login
+  /// Buat team baru untuk user yang login.
+  /// Atomik via RPC server-side: tier Team diverifikasi server, invite
+  /// code acak, row team + member admin dibuat dalam satu transaksi.
   Future<Team?> createTeam(String name) async {
     final client = _client;
     if (client == null) return null;
     final user = currentUser;
     if (user == null) return null;
     try {
-      final inviteCode = _generateInviteCode();
-      final response = await client.from('teams').insert({
-        'name': name,
-        'invite_code': inviteCode,
-        'created_by': user.id,
-      }).select().single();
+      final teamId = await client.rpc('create_team_secure', params: {'p_name': name});
+      if (teamId == null) return null;
+      final response = await client.from('teams').select().eq('id', teamId as String).single();
       final team = Team.fromMap(response);
-      await client.from('team_members').insert({
-        'team_id': team.id,
-        'user_id': user.id,
-        'role': 'admin',
-        'email': user.email,
-      });
       AppLogger.info('Supabase', 'Team created: ${team.id}');
       return team;
     } catch (e, st) {
       AppLogger.info('Supabase', 'Create team error: $e');
       AppLogger.info('Supabase', 'Stack: $st');
-      return null;
+      rethrow;
     }
   }
 
@@ -261,57 +319,54 @@ class SupabaseService {
     }
   }
 
-  /// Bergabung ke team dengan invite code
+  /// Bergabung ke team dengan invite code.
+  /// Via RPC server-side: invite code diverifikasi, limit 10 anggota
+  /// dicek atomik, tier Basic diverifikasi server, role di-force 'member'.
+  /// Return true jika berhasil (atau sudah member), false jika kode salah.
+  /// Throw exception dengan pesan user-friendly jika diblokir server.
   Future<bool> joinTeam(String inviteCode) async {
     final client = _client;
     if (client == null) return false;
-    final user = currentUser;
-    if (user == null) return false;
+    if (currentUser == null) return false;
     try {
-      final team = await getTeamByInviteCode(inviteCode);
-      if (team == null) return false;
-      // Cek apakah sudah member
-      final existing = await client
-          .from('team_members')
-          .select()
-          .eq('team_id', team.id)
-          .eq('user_id', user.id)
-          .maybeSingle();
-      if (existing != null) return true; // sudah member
-      // Cek limit anggota (maks 10)
-      final members = await client
-          .from('team_members')
-          .select('id')
-          .eq('team_id', team.id);
-      if (members.length >= 10) {
-        AppLogger.info('Supabase', 'Team already has 10 members, cannot join');
-        return false;
-      }
-      await client.from('team_members').insert({
-        'team_id': team.id,
-        'user_id': user.id,
-        'role': 'member',
-        'email': user.email,
-      });
-      AppLogger.info('Supabase', 'Joined team: ${team.id}');
-      return true;
-    } catch (e, st) {
-      AppLogger.info('Supabase', 'Join team error: $e');
-      AppLogger.info('Supabase', 'Stack: $st');
-      return false;
+      final ok = await client.rpc('join_team_with_code', params: {'p_code': inviteCode});
+      AppLogger.info('Supabase', 'joinTeam via RPC: ok=$ok');
+      return ok == true;
+    } catch (e) {
+      final msg = e.toString();
+      AppLogger.info('Supabase', 'Join team error: $msg');
+      // Kode tidak valid → return false (bukan error blokir)
+      if (msg.contains('PGRST')) throw Exception('Kode invite tidak valid');
+      // Error blokir dari server (tier, penuh, dll.) → teruskan pesannya
+      throw Exception(_friendlyRpcError(msg));
     }
   }
 
-  /// Keluar dari tim (hapus diri dari team_members)
-  Future<bool> leaveTeam() async {
+  /// Ambil pesan error yang user-friendly dari exception RPC Postgres.
+  /// Format toString() postgrest: "PostgrestException(message: X, code: P0001, details: ..., hint: ...)"
+  /// Pesan RAISE EXCEPTION sendiri BISA mengandung koma — jadi stop pada
+  // ", code:" (non-greedy), bukan pada koma pertama.
+  static String _friendlyRpcError(String raw) {
+    final match = RegExp(r'message: (.+?), code:').firstMatch(raw);
+    final inner = match?.group(1)?.trim();
+    if (inner != null && inner.isNotEmpty) return inner;
+    return 'Gagal bergabung ke tim. Coba lagi.';
+  }
+
+  /// Keluar dari tim (hapus diri dari team_members).
+  /// Selalu scoped ke [teamId] — jangan pernah hapus dari semua tim.
+  Future<bool> leaveTeam(String teamId) async {
     final client = _client;
     if (client == null) return false;
     final user = currentUser;
     if (user == null) return false;
     try {
+      // Tidak pakai .select()/rowcount: "sudah bukan member" adalah kondisi
+      // akhir yang diinginkan — delete 0 baris tetap sukses (idempotent).
       await client
           .from('team_members')
           .delete()
+          .eq('team_id', teamId)
           .eq('user_id', user.id);
       return true;
     } catch (e) {
@@ -320,59 +375,48 @@ class SupabaseService {
     }
   }
 
-  /// Transfer admin role to another member
-  Future<bool> transferAdmin(String teamId, String newAdminUserId) async {
+  /// Keluarkan anggota dari tim (admin only). Via RPC server-side
+  /// agar cek role admin tidak bisa dilewati client.
+  Future<bool> kickMember(String teamId, String userId) async {
     final client = _client;
     if (client == null) return false;
-    final user = currentUser;
-    if (user == null) return false;
     try {
-      // Update team's created_by to new admin
-      await client
-          .from('teams')
-          .update({'created_by': newAdminUserId})
-          .eq('id', teamId);
-      // Update new member's role to admin
-      await client
-          .from('team_members')
-          .update({'role': 'admin'})
-          .eq('team_id', teamId)
-          .eq('user_id', newAdminUserId);
-      // Remove old admin from team_members
-      await client
-          .from('team_members')
-          .delete()
-          .eq('user_id', user.id);
-      return true;
+      final ok = await client.rpc('kick_team_member', params: {
+        'p_team_id': teamId,
+        'p_user_id': userId,
+      });
+      return ok == true;
     } catch (e) {
-      AppLogger.info('Supabase', 'Transfer admin error: $e');
-      return false;
+      AppLogger.info('Supabase', 'Kick member error: $e');
+      rethrow;
     }
   }
 
-  /// Dissolve team (delete team and all members) — admin only, when alone
+  /// Transfer admin role to another member (old admin stays as member).
+  /// Atomik via RPC server-side — tidak bisa dilewati client.
+  Future<bool> transferAdmin(String teamId, String newAdminUserId) async {
+    final client = _client;
+    if (client == null) return false;
+    try {
+      final ok = await client.rpc('transfer_team_admin', params: {
+        'p_team_id': teamId,
+        'p_new_admin_id': newAdminUserId,
+      });
+      return ok == true;
+    } catch (e) {
+      AppLogger.info('Supabase', 'Transfer admin error: $e');
+      rethrow;
+    }
+  }
+
+  /// Dissolve team (delete team and all members) — admin only.
+  /// Atomik via RPC server-side; scans tim kembali jadi personal.
   Future<bool> dissolveTeam(String teamId) async {
     final client = _client;
     if (client == null) return false;
     try {
-      // Set team_id to NULL on all scans (they become personal scans again)
-      await client
-          .from('scans')
-          .update({'team_id': null})
-          .eq('team_id', teamId);
-      
-      // Delete all team members
-      await client
-          .from('team_members')
-          .delete()
-          .eq('team_id', teamId);
-      // Delete the team
-      await client
-          .from('teams')
-          .delete()
-          .eq('id', teamId);
-      
-      return true;
+      final ok = await client.rpc('dissolve_team_secure', params: {'p_team_id': teamId});
+      return ok == true;
     } catch (e) {
       AppLogger.info('Supabase', 'Dissolve team error: $e');
       return false;
@@ -809,16 +853,77 @@ class SupabaseService {
     }
   }
 
-  String _generateInviteCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    final now = DateTime.now().millisecondsSinceEpoch;
-    var code = '';
-    var n = now % 1000000;
-    for (var i = 0; i < 6; i++) {
-      code += chars[(n + i * 7) % chars.length];
+  /// Klaim subscription yang terdaftar atas email user (Google login link).
+  /// RPC SECURITY DEFINER di server — tier tidak dapat dipalsukan client.
+  Future<void> claimSubscriptionByEmail() async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      await client.rpc('claim_subscription_by_email');
+    } catch (e) {
+      AppLogger.info('Supabase', 'claim subscription by email error: $e');
     }
-    return code;
   }
+
+  /// Catat purchase receipt ke tabel purchase_receipts (audit trail IAP).
+  Future<void> insertPurchaseReceipt({
+    required String productId,
+    required String purchaseToken,
+    String? orderId,
+  }) async {
+    final client = _client;
+    if (client == null) return;
+    final user = currentUser;
+    if (user == null) return;
+    try {
+      await client.from('purchase_receipts').upsert({
+        'user_id': user.id,
+        'product_id': productId,
+        'purchase_token': purchaseToken,
+        'order_id': orderId,
+      }, onConflict: 'user_id,purchase_token');
+    } catch (e) {
+      AppLogger.info('Supabase', 'insert purchase receipt error: $e');
+    }
+  }
+
+  /// Verifikasi purchase ke server (Edge Function verify-purchase).
+  /// Server cek token ke Google Play lalu set tier yang sah.
+  /// Return tier jika terverifikasi, null jika gagal/belum aktif.
+  Future<String?> verifyPurchase({
+    required String productId,
+    required String purchaseToken,
+    String? orderId,
+  }) async {
+    final client = _client;
+    if (client == null) return null;
+    if (currentUser == null) return null;
+    try {
+      final body = <String, dynamic>{
+        'productId': productId,
+        'purchaseToken': purchaseToken,
+      };
+      if (orderId != null) body['orderId'] = orderId;
+      final res = await client.functions.invoke(
+        'verify-purchase',
+        body: body,
+      );
+      final data = res.data as Map<String, dynamic>?;
+      if (data == null) return null;
+      if (data['success'] == true) {
+        return data['tier'] as String?;
+      }
+      AppLogger.info('Supabase', 'verifyPurchase not active: ${data['reason']}');
+      return null;
+    } catch (e) {
+      AppLogger.info('Supabase', 'verifyPurchase error: $e');
+      return null;
+    }
+  }
+
+  // Invite code sekarang dibuat server-side di create_team_secure()
+  // (acak via md5(random()+clock_timestamp)) — generator client lama
+  // yang prediktabel dihapus.
 
   // ── Single-device session management ──
 
@@ -1146,5 +1251,77 @@ class SupabaseService {
       AppLogger.info('Supabase', 'fetch packages error: $e');
       return [];
     }
+  }
+
+  // ── Signup approval ──
+
+  /// Status approval user yang sedang login.
+  /// Return null jika tidak ada baris (user lama / offline) → dianggap approved.
+  Future<String?> getMyApprovalStatus() async {
+    final client = _client;
+    if (client == null || currentUser == null) return null;
+    try {
+      final res = await client.rpc('get_my_approval_status');
+      return res as String?;
+    } catch (e) {
+      AppLogger.info('Supabase', 'getMyApprovalStatus error: $e');
+      return null;
+    }
+  }
+
+  /// (Admin) Daftar pendaftar yang menunggu persetujuan.
+  Future<List<Map<String, dynamic>>> fetchPendingApprovals() async {
+    final client = _client;
+    if (client == null) return [];
+    try {
+      final res = await client.rpc('admin_list_pending_approvals');
+      return List<Map<String, dynamic>>.from(res as List);
+    } catch (e) {
+      AppLogger.info('Supabase', 'fetchPendingApprovals error: $e');
+      return [];
+    }
+  }
+
+  /// (Admin) Setujui / tolak pendaftar.
+  Future<bool> decideApproval(String userId, String action, {String? note}) async {
+    final client = _client;
+    if (client == null) return false;
+    try {
+      final res = await client.rpc('admin_decide_approval', params: {
+        'p_user_id': userId,
+        'p_action': action,
+        'p_note': note,
+      });
+      return res == true;
+    } catch (e) {
+      AppLogger.info('Supabase', 'decideApproval error: $e');
+      return false;
+    }
+  }
+
+  /// (Admin) Subscribe realtime INSERT user_approvals (status pending).
+  /// Return channel — caller yang cancel.
+  RealtimeChannel? subscribeNewApprovals({
+    required void Function(String email) onNewSignup,
+  }) {
+    final client = _client;
+    if (client == null) return null;
+    final channel = client
+        .channel('admin-approvals')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'user_approvals',
+          callback: (payload) {
+            final row = payload.newRecord;
+            final email = row['email'] as String? ?? '(tanpa email)';
+            final status = row['status'] as String? ?? 'pending';
+            if (status != 'pending') return;
+            AppLogger.info('Supabase', 'realtime new signup: $email');
+            onNewSignup(email);
+          },
+        )
+        .subscribe();
+    return channel;
   }
 }

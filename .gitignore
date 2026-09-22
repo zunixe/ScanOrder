@@ -47,3 +47,9 @@ coverage/
 fastlane/play-store-key.json
 fastlane/report.xml
 .playwright-mcp/
+
+# Supabase access token (kredensial lokal, jangan commit)
+SUPABASE_TOKEN.md
+
+# Local dev artifacts
+.freebuff/

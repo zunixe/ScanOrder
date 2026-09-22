@@ -181,7 +181,12 @@ class LargeTouchTarget extends StatelessWidget {
 /// Screen reader announcement utility
 class AccessibilityAnnouncement {
   static void announce(BuildContext context, String message, {bool assertive = false}) {
-    SemanticsService.announce(message, TextDirection.ltr);
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      TextDirection.ltr,
+      assertiveness: assertive ? Assertiveness.assertive : Assertiveness.polite,
+    );
   }
 
   static void announceError(BuildContext context, String message) {

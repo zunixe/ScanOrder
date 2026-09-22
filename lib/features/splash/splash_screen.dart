@@ -54,8 +54,8 @@ class _SplashScreenState extends State<SplashScreen>
       _navigated = true;
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
-          pageBuilder: (_, __, ___) => widget.next,
-          transitionsBuilder: (_, animation, __, child) =>
+          pageBuilder: (_, _, _) => widget.next,
+          transitionsBuilder: (_, animation, _, child) =>
               FadeTransition(opacity: animation, child: child),
           transitionDuration: const Duration(milliseconds: 300),
         ),
@@ -86,7 +86,7 @@ class _SplashScreenState extends State<SplashScreen>
           // Main content
           AnimatedBuilder(
             animation: _controller,
-            builder: (_, __) {
+            builder: (_, _) {
               return Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

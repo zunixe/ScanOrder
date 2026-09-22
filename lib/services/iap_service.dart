@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:in_app_purchase_android/billing_client_wrappers.dart';
+import '../core/supabase/supabase_service.dart';
 import 'quota_service.dart';
 
 class IapService {
@@ -122,6 +123,46 @@ class IapService {
           await _quota.purchaseOrChangeTier(tier);
           await onPurchaseApplied?.call(tier);
         }
+        // Record receipt for server-side verification (webhook / cron)
+        final token = purchase.verificationData.serverVerificationData;
+        if (token.isNotEmpty) {
+          await SupabaseService().insertPurchaseReceipt(
+            productId: purchase.productID,
+            purchaseToken: token,
+            orderId: purchase.purchaseID,
+          );
+          // Verifikasi server: Edge Function cek token ke Google Play
+          // lalu set tier yang sah di user_subscriptions (source of truth).
+          final verifiedTier = await SupabaseService().verifyPurchase(
+            productId: purchase.productID,
+            purchaseToken: token,
+            orderId: purchase.purchaseID,
+          );
+          if (verifiedTier != null) {
+            final serverTier = _tierForServerTier(verifiedTier);
+            if (serverTier != null && serverTier != tier) {
+              // Server mengetahui tier berbeda (mis. upgrade dari device lain)
+              await _quota.purchaseOrChangeTier(serverTier);
+              await onPurchaseApplied?.call(serverTier);
+            }
+          } else {
+            AppLogger.info('IAP', 'server verification pending for ${purchase.productID} — tier lokal sementara, akan dikoreksi saat sync');
+          }
+        }
+      }
+
+      // Canceled / expired subscription: downgrade active tier to free
+      if (purchase.status == PurchaseStatus.canceled) {
+        _activePurchases.remove(purchase.productID);
+        final tier = tierForProductId(purchase.productID);
+        if (tier != null) {
+          final currentTier = await _quota.getTier();
+          // Only downgrade if current tier is the canceled one (not an upgrade)
+          if (currentTier != StorageTier.free && currentTier.index <= tier.index) {
+            AppLogger.info('IAP', 'subscription canceled for $tier — downgrading to free');
+            await _quota.setTier(StorageTier.free);
+          }
+        }
       }
 
       if (purchase.pendingCompletePurchase) {
@@ -161,6 +202,20 @@ class IapService {
       case proProductId:
         return StorageTier.pro;
       case teamProductId:
+        return StorageTier.unlimited;
+      default:
+        return null;
+    }
+  }
+
+  /// Konversi tier string dari server ('basic'|'pro'|'unlimited') ke enum
+  StorageTier? _tierForServerTier(String serverTier) {
+    switch (serverTier) {
+      case 'basic':
+        return StorageTier.basic;
+      case 'pro':
+        return StorageTier.pro;
+      case 'unlimited':
         return StorageTier.unlimited;
       default:
         return null;

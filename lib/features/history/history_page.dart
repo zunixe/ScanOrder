@@ -213,7 +213,7 @@ class _HistoryPageState extends State<HistoryPage> {
         title: const Text('Riwayat Scan'),
         actions: [
           Consumer<SubscriptionProvider>(
-            builder: (_, sub, __) {
+            builder: (_, sub, _) {
               if (sub.currentTier == StorageTier.free) return const SizedBox.shrink();
               return IconButton(
                 icon: const Icon(Icons.file_download_outlined),
@@ -229,7 +229,7 @@ class _HistoryPageState extends State<HistoryPage> {
           children: [
             // Cloud backup prompt (guest only)
             Consumer<AuthProvider>(
-              builder: (_, auth, __) {
+              builder: (_, auth, _) {
                 if (auth.isLoggedIn) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -458,7 +458,7 @@ class _HistoryPageState extends State<HistoryPage> {
                     child: AsyncStateBuilder<void>(
                       state: provider.scansState,
                       onRetry: () => provider.loadScans(),
-                      builder: (_, __) => const SizedBox.shrink(),
+                      builder: (_, _) => const SizedBox.shrink(),
                     ),
                   );
                 }
@@ -963,6 +963,7 @@ class _OrderTileState extends State<_OrderTile> {
     );
     if (picked == null) return;
 
+    if (!context.mounted) return;
     final provider = context.read<HistoryProvider>();
     await provider.updatePhoto(order.id!, picked.path);
 
@@ -974,6 +975,7 @@ class _OrderTileState extends State<_OrderTile> {
   }
 
   Future<void> _removePhoto(BuildContext context) async {
+    if (!context.mounted) return;
     final provider = context.read<HistoryProvider>();
     await provider.updatePhoto(order.id!, null);
 

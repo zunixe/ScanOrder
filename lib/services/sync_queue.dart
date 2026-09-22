@@ -85,6 +85,11 @@ class SyncQueue {
   int _tasksProcessedInWindow = 0;
   DateTime? _windowStart;
 
+  /// Tim aktif saat ini — di-set AuthProvider via setTeamContext.
+  /// Dipakai untuk mendrop task milik tim yang sudah ditinggal.
+  String? _teamContext;
+  void setTeamContext(String? teamId) => _teamContext = teamId;
+
   static const int _maxRetries = 5;
   static const int _maxTasksPerMinute = 30; // rate limit
   static const int _concurrentUploads = 3;
@@ -152,12 +157,42 @@ class SyncQueue {
     }
   }
 
-  /// Proses satu task
-  Future<void> _processTask(SyncTask task) async {
+  /// Proses satu task.
+  /// Return true jika task selesai (sukses / dibuang), false jika perlu retry.
+  Future<bool> _processTask(SyncTask task) async {
     final client = _supabase.client;
     if (client == null) {
       _markRetry(task);
-      return;
+      return false;
+    }
+
+    // Drop task milik user lain — sisa dari akun lama sebelum logout/ganti
+    // akun. Tanpa ini, register akun baru akan mencoba sync task akun lama
+    // → RLS menolak → notifikasi sync error berulang (bug lama).
+    // PENTING: task scan TIM membawa user_id PEMILIK scan (admin), bukan
+    // scanner — jadi guard ini hanya untuk task personal (tanpa team_id).
+    final taskUserId = task.payload['user_id'] as String?;
+    final taskTeamId = task.payload['team_id'] as String?;
+    final currentUserId = _supabase.currentUser?.id;
+    if (taskUserId != null &&
+        currentUserId != null &&
+        taskUserId != currentUserId &&
+        taskTeamId == null) {
+      final db = await _getQueueDb();
+      await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
+      AppLogger.info('SyncQueue', 'Dropped stale task ${task.id} (task user=${taskUserId.substring(0, 8)}… ≠ current user)');
+      return true;
+    }
+
+    // Drop task milik tim yang sudah ditinggal/keluar. Hanya saat konteks
+    // tim SUDAH di-set oleh AuthProvider (setelah _loadTeam) — sebelum itu
+    // null berarti "belum tahu", JANGAN drop (cold-start: processPending()
+    // berjalan sebelum _loadTeam selesai → salah hapus task personal).
+    if (_teamContext != null && taskTeamId != null && _teamContext != taskTeamId) {
+      final db = await _getQueueDb();
+      await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
+      AppLogger.info('SyncQueue', 'Dropped task ${task.id} (team sudah ditinggal: $taskTeamId)');
+      return true;
     }
 
     bool success = false;
@@ -181,7 +216,8 @@ class SyncQueue {
       AppLogger.info('SyncQueue', 'Task ${task.id} error: $e');
       MonitoringService.reportError(e, context: 'sync_${task.type.name}', extra: {'task_id': task.id});
       AnalyticsService.syncError('${task.type.name}: $e');
-      NotificationService().showSyncError(error: '${task.type.name}: $e');
+      // Notifikasi error hanya saat task benar-benar dibuang (max retry)
+      // — lihat _markRetry. Jangan spam user tiap retry.
     }
 
     if (success) {
@@ -189,8 +225,10 @@ class SyncQueue {
       await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
       _tasksProcessedInWindow++;
       AppLogger.info('SyncQueue', 'Task ${task.id} completed ✓');
+      return true;
     } else {
-      _markRetry(task);
+      await _markRetry(task);
+      return false;
     }
   }
 
@@ -403,12 +441,15 @@ class SyncQueue {
           });
           supabaseUpdated = true; // will be handled by insertScan
         } else {
-          // Update photo_url in Supabase
-          await client
-              .from('scans')
-              .update({'photo_url': url})
-              .eq('resi', resi);
-          AppLogger.info('SyncQueue', 'uploadPhoto: updated photo_url in Supabase for resi=$resi');
+          // Update photo_url in Supabase — SELALU scoped ke user/team agar
+          // tidak menimpa foto scan tim/user lain yang kebetulan resi sama.
+          final taskTeamId = p['team_id'] as String?;
+          var updateQuery = client.from('scans').update({'photo_url': url}).eq('resi', resi);
+          updateQuery = taskTeamId != null
+              ? updateQuery.eq('team_id', taskTeamId)
+              : updateQuery.eq('user_id', userId ?? '');
+          await updateQuery;
+          AppLogger.info('SyncQueue', 'uploadPhoto: updated photo_url in Supabase for resi=$resi (teamId=$taskTeamId)');
           supabaseUpdated = true;
         }
       } catch (e) {
@@ -471,17 +512,46 @@ class SyncQueue {
     if (userId == null) return false;
 
     try {
-      await client.from('user_subscriptions').upsert({
+      // Read current cloud tier to enforce no-client-downgrade/no-forgery:
+      // a client may only write usage fields (cycle_used, storage_used) and
+      // email; tier/allowance/period changes must come from IAP restore
+      // (purchase stream) or an admin, not arbitrary client writes.
+      final current = await client
+          .from('user_subscriptions')
+          .select('tier, cycle_used')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      final payload = <String, dynamic>{
         'user_id': userId,
         'email': p['email'],
-        'tier': p['tier'],
-        'active_from': p['active_from'],
-        'active_until': p['active_until'],
-        'cycle_allowance': int.tryParse(p['cycle_allowance']?.toString() ?? '0'),
         'cycle_used': int.tryParse(p['cycle_used']?.toString() ?? '0'),
         'storage_used': int.tryParse(p['storage_used']?.toString() ?? '0'),
         'updated_at': DateTime.now().toIso8601String(),
-      });
+      };
+
+      final cloudTier = current?['tier'] as String?;
+      final payloadTier = p['tier'] as String?;
+      final cloudUsed = (current?['cycle_used'] as num?)?.toInt();
+      final payloadUsed = int.tryParse(p['cycle_used']?.toString() ?? '0');
+
+      if (cloudTier == null) {
+        // No row yet: write full snapshot (initial sync after signup)
+        payload['tier'] = payloadTier;
+        payload['active_from'] = p['active_from'];
+        payload['active_until'] = p['active_until'];
+        payload['cycle_allowance'] = int.tryParse(p['cycle_allowance']?.toString() ?? '0');
+      } else {
+        // Preserve cloud tier/allowance/period — server is source of truth
+        // for entitlements. Only bump cycle_used if payload is ahead (offline scans).
+        if (cloudUsed != null && payloadUsed != null && payloadUsed > cloudUsed) {
+          payload['cycle_used'] = payloadUsed;
+        } else if (cloudUsed != null) {
+          payload['cycle_used'] = cloudUsed;
+        }
+      }
+
+      await client.from('user_subscriptions').upsert(payload);
       return true;
     } catch (e) {
       AppLogger.info('SyncQueue', 'syncSubscription error: $e');
@@ -492,10 +562,11 @@ class SyncQueue {
   /// Tandai task untuk retry dengan exponential backoff
   Future<void> _markRetry(SyncTask task) async {
     if (task.retryCount >= _maxRetries) {
-      // Max retry, hapus task
+      // Max retry, hapus task + beri tahu user SEKALI
       AppLogger.info('SyncQueue', 'Task ${task.id} max retries reached, dropping');
       final db = await _getQueueDb();
       await db.delete('sync_queue', where: 'id = ?', whereArgs: [task.id]);
+      NotificationService().showSyncError(error: 'Data "${task.type.name}" gagal dikirim setelah beberapa percobaan.');
       return;
     }
 

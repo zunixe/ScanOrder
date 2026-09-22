@@ -4,18 +4,22 @@ import 'package:flutter/foundation.dart';
 /// Inspired by Riverpod's AsyncValue but usable with ChangeNotifier/Provider.
 ///
 /// Usage:
+///   ```dart
 ///   AsyncState<List<ScanRecord>> scansState = const AsyncState.idle();
 ///   scansState = const AsyncState.loading();
 ///   scansState = AsyncState.data(myList);
 ///   scansState = AsyncState.error('Failed to load', stackTrace);
+///   ```
 ///
 /// In UI:
+///   ```dart
 ///   state.when(
 ///     idle: () => Text('No data yet'),
 ///     loading: () => CircularProgressIndicator(),
 ///     data: (data) => Text(data.toString()),
 ///     error: (msg, retry) => ErrorWidget(msg, onRetry: retry),
 ///   );
+///   ```
 sealed class AsyncState<T> {
   const AsyncState();
 

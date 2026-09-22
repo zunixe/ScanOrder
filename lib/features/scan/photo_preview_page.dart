@@ -234,15 +234,15 @@ class _PhotoPageItemState extends State<_PhotoPageItem> {
           ? CachedNetworkImage(
               imageUrl: photoPath,
               fit: BoxFit.contain,
-              placeholder: (_, __) => const Center(
+              placeholder: (_, _) => const Center(
                 child: CircularProgressIndicator(color: Colors.white),
               ),
-              errorWidget: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey),
+              errorWidget: (_, _, _) => const Icon(Icons.broken_image, size: 64, color: Colors.grey),
             )
           : Image.file(
               File(photoPath),
               fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey),
+              errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 64, color: Colors.grey),
             ),
     );
   }

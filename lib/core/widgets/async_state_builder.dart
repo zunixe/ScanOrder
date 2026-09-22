@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import '../../core/state/async_state.dart';
 import '../../core/l10n/app_localizations.dart';
 
-/// Generic widget that renders AsyncState<T> with proper loading/error/data UI.
+/// Generic widget that renders `AsyncState<T>` with proper loading/error/data UI.
 ///
 /// Usage:
+///   ```dart
 ///   AsyncStateBuilder<List<ScanRecord>>(
 ///     state: historyProvider.scansState,
 ///     onRetry: () => historyProvider.loadScans(),
 ///     builder: (context, scans) => ListView(...),
 ///   );
+///   ```
 class AsyncStateBuilder<T> extends StatelessWidget {
   final AsyncState<T> state;
   final Widget Function(BuildContext context, T data) builder;
@@ -38,7 +40,7 @@ class AsyncStateBuilder<T> extends StatelessWidget {
           return Stack(
             children: [
               builder(context, previousData),
-              if (loadingWidget != null) loadingWidget!,
+              ?loadingWidget,
             ],
           );
         }

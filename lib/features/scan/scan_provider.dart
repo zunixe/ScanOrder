@@ -44,6 +44,7 @@ class ScanProvider extends ChangeNotifier {
   bool _processing = false;
   bool _savePhoto = true;
   bool _manualPhoto = false;
+  bool _cloudCheckFailed = false;
   final Map<String, DateTime> _recentScans = {};
   static const Duration _recentRepeatWindow = Duration(seconds: 5);
 
@@ -67,6 +68,7 @@ class ScanProvider extends ChangeNotifier {
   }
 
   bool get savePhoto => _savePhoto;
+  bool get cloudCheckFailed => _cloudCheckFailed;
   String get quotaDisplay {
     if (scanLimit < 0) return '∞';
     return '$remainingScans/$scanLimit';
@@ -289,6 +291,7 @@ class ScanProvider extends ChangeNotifier {
       // In team mode, scans belong to admin — use admin's user_id for ownership
       // Free users (not logged in) use null — local-only storage
       final scanOwnerId = _teamId != null && _adminUserId != null ? _adminUserId! : userId;
+      _cloudCheckFailed = false;
       if (activeCategoryId != null) {
         // Dalam kategori: cek duplikat hanya di kategori itu
         final alreadyInCategory = await _db.isOrderInCategory(resi, activeCategoryId!, userId: userId);
@@ -305,10 +308,10 @@ class ScanProvider extends ChangeNotifier {
           notifyListeners();
           return lastResult;
         }
-        // Team mode: also check Supabase for duplicates in same category
-        if (teamId != null) {
-          final teamDuplicate = await _checkTeamDuplicate(resi, activeCategoryId);
-          if (teamDuplicate) {
+        // Cek duplikat di cloud (team ATAU personal yang sudah login)
+        if (userId != null) {
+          final cloudDuplicate = await _checkCloudDuplicate(resi, activeCategoryId, isTeam: teamId != null || _teamId != null, userId: userId);
+          if (cloudDuplicate == true) {
             SoundService().playScanDuplicate();
             lastResult = ScanResult(
               status: ScanStatus.duplicate,
@@ -317,6 +320,10 @@ class ScanProvider extends ChangeNotifier {
             );
             notifyListeners();
             return lastResult;
+          }
+          if (cloudDuplicate == null) {
+            _cloudCheckFailed = true;
+            AppLogger.info('ScanProvider', 'cloud duplicate check failed (offline?) for resi=$resi — saving local only');
           }
         }
       } else {
@@ -333,10 +340,10 @@ class ScanProvider extends ChangeNotifier {
           notifyListeners();
           return lastResult;
         }
-        // Team mode: also check Supabase for global duplicates
-        if (teamId != null) {
-          final teamDuplicate = await _checkTeamDuplicate(resi, null);
-          if (teamDuplicate) {
+        // Cek duplikat di cloud (team ATAU personal yang sudah login)
+        if (userId != null) {
+          final cloudDuplicate = await _checkCloudDuplicate(resi, null, isTeam: teamId != null || _teamId != null, userId: userId);
+          if (cloudDuplicate == true) {
             SoundService().playScanDuplicate();
             lastResult = ScanResult(
               status: ScanStatus.duplicate,
@@ -345,6 +352,10 @@ class ScanProvider extends ChangeNotifier {
             );
             notifyListeners();
             return lastResult;
+          }
+          if (cloudDuplicate == null) {
+            _cloudCheckFailed = true;
+            AppLogger.info('ScanProvider', 'cloud duplicate check failed (offline?) for resi=$resi — saving local only');
           }
         }
       }
@@ -428,8 +439,9 @@ class ScanProvider extends ChangeNotifier {
       final queue = SyncQueue();
       final user = SupabaseService().currentUser;
       if (user != null) {
-        // Enqueue photo upload if needed
-        if (photoPath != null) {
+        final tier = await _quota.getTier();
+        // Enqueue photo upload if needed (Free tier: no cloud storage)
+        if (photoPath != null && tier != StorageTier.free) {
           queue.enqueue(SyncTaskType.uploadPhoto, {
             'local_path': photoPath,
             'user_id': scanOwnerId,
@@ -445,7 +457,7 @@ class ScanProvider extends ChangeNotifier {
           'marketplace': marketplace,
           'scanned_at': now.millisecondsSinceEpoch.toString(),
           'date': DateFormat('yyyy-MM-dd').format(now),
-          'photo_url': photoPath, // local path, will be updated after upload
+          'photo_url': photoPath != null && tier != StorageTier.free ? photoPath : null,
           'team_id': teamId,
           'scanned_by': userId,
           'category_id': activeCategoryId,
@@ -485,18 +497,19 @@ class ScanProvider extends ChangeNotifier {
     await _db.updateScanPhoto(id, photoPath);
   }
 
-  /// Check if resi already exists in team scans on Supabase
-  /// If categoryId is provided, only check within that category
-  Future<bool> _checkTeamDuplicate(String resi, int? categoryId) async {
+  /// Check if resi already exists on Supabase (team scans or personal scans).
+  /// Returns true = duplicate, false = clean, null = check failed (offline/error).
+  /// If categoryId is provided, only check within that category.
+  Future<bool?> _checkCloudDuplicate(String resi, int? categoryId, {required bool isTeam, String? userId}) async {
     try {
       final client = SupabaseService().client;
-      if (client == null || _teamId == null) return false;
+      if (client == null) return null;
+      if (isTeam && _teamId == null) return null;
 
-      // Check if resi exists in team scans
-      final scans = await client
-          .from('scans')
-          .select('id')
-          .eq('team_id', _teamId!)
+      // Check if resi exists in team or personal scans
+      final scans = await (isTeam && _teamId != null
+              ? client.from('scans').select('id').eq('team_id', _teamId!)
+              : client.from('scans').select('id').eq('user_id', userId ?? ''))
           .eq('resi', resi)
           .limit(1);
 
@@ -529,8 +542,8 @@ class ScanProvider extends ChangeNotifier {
 
       return scRows.isNotEmpty;
     } catch (e) {
-      AppLogger.info('ScanProvider', '_checkTeamDuplicate error: $e');
-      return false;
+      AppLogger.info('ScanProvider', '_checkCloudDuplicate error: $e');
+      return null;
     }
   }
 }
