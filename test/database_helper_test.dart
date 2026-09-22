@@ -10,6 +10,12 @@ void main() {
     sqfliteFfiInit();
     databaseFactoryOrNull = databaseFactoryFfi;
     DatabaseHelper.setTestMode(true);
+    DatabaseHelper.testDatabasePath =
+        '${inMemoryDatabasePath}_dbhelper_${DateTime.now().microsecondsSinceEpoch}';
+  });
+
+  tearDownAll(() async {
+    await DatabaseHelper.resetForTests();
   });
 
   group('DatabaseHelper', () {
@@ -500,6 +506,112 @@ void main() {
           scannedBy: 'scanner1',
         );
         expect(id, greaterThan(0));
+      });
+    });
+
+    group('Coverage gaps', () {
+      test('getScanById returns record', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final id = await db.insertScan(
+          ScanRecord(resi: 'BYID1', marketplace: 'JNE', scannedAt: now, date: date),
+          userId: 'u1',
+        );
+        final found = await db.getScanById(id);
+        expect(found, isNotNull);
+        expect(found!.resi, 'BYID1');
+        expect(found.marketplace, 'JNE');
+      });
+
+      test('getScanById returns null for unknown id', () async {
+        expect(await db.getScanById(999999), isNull);
+      });
+
+      test('getOrderCountByDate with teamId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(
+          ScanRecord(resi: 'TCOUNT1', marketplace: 'Shopee', scannedAt: now, date: date),
+          userId: 'admin1',
+          teamId: 'team1',
+        );
+        await db.insertScan(
+          ScanRecord(resi: 'TCOUNT2', marketplace: 'JNE', scannedAt: now, date: date),
+          userId: 'admin1',
+          teamId: 'team1',
+        );
+        expect(await db.getOrderCountByDate(date, teamId: 'team1'), 2);
+      });
+
+      test('getTotalOrderCount with teamId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(
+          ScanRecord(resi: 'TTOT1', marketplace: 'Shopee', scannedAt: now, date: date),
+          userId: 'admin1',
+          teamId: 'teamT',
+        );
+        expect(await db.getTotalOrderCount(teamId: 'teamT'), 1);
+      });
+
+      test('getScansByDate personal returns only that date', () async {
+        final now = DateTime.now();
+        final today = now.toIso8601String().substring(0, 10);
+        await db.insertScan(
+          ScanRecord(resi: 'DA1', marketplace: 'Shopee', scannedAt: now, date: today),
+          userId: 'u1',
+        );
+        await db.insertScan(
+          ScanRecord(resi: 'DA2', marketplace: 'JNE', scannedAt: now, date: '2000-01-01'),
+          userId: 'u1',
+        );
+        final scans = await db.getScansByDate(today, userId: 'u1');
+        expect(scans, hasLength(1));
+        expect(scans.first.resi, 'DA1');
+      });
+
+      test('getDistinctDates personal returns unique dates desc', () async {
+        final now = DateTime.now();
+        await db.insertScan(
+          ScanRecord(resi: 'DD1', marketplace: 'Shopee', scannedAt: now, date: '2021-01-01'),
+          userId: 'u1',
+        );
+        await db.insertScan(
+          ScanRecord(resi: 'DD2', marketplace: 'JNE', scannedAt: now, date: '2021-02-02'),
+          userId: 'u1',
+        );
+        await db.insertScan(
+          ScanRecord(resi: 'DD3', marketplace: 'J&T', scannedAt: now, date: '2021-01-01'),
+          userId: 'u1',
+        );
+        final dates = await db.getDistinctDates(userId: 'u1');
+        expect(dates.toSet(), {'2021-01-01', '2021-02-02'});
+      });
+
+      test('updateOrderSyncStatus updates status column', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        final id = await db.insertScan(
+          ScanRecord(resi: 'SYNC1', marketplace: 'Shopee', scannedAt: now, date: date),
+          userId: 'u1',
+        );
+        final updated = await db.updateOrderSyncStatus(id, 'synced');
+        expect(updated, 1);
+        final found = await db.getScanById(id);
+        expect(found!.syncStatus, 'synced');
+      });
+
+      test('getAllScans returns only null-user guest scans when no userId', () async {
+        final now = DateTime.now();
+        final date = now.toIso8601String().substring(0, 10);
+        await db.insertScan(ScanRecord(resi: 'G1', marketplace: 'Shopee', scannedAt: now, date: date));
+        await db.insertScan(
+          ScanRecord(resi: 'U1', marketplace: 'JNE', scannedAt: now, date: date),
+          userId: 'u1',
+        );
+        final guestScans = await db.getAllScans();
+        expect(guestScans, hasLength(1));
+        expect(guestScans.first.resi, 'G1');
       });
     });
   });

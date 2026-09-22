@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:scanorder/core/offline/sync_queue_item.dart';
 
@@ -197,9 +198,12 @@ void main() {
       expect(copy.localVersion, 88);
     });
 
-    test('toMap payload is preserved', () {
+    test('toMap payload is preserved (JSON-encoded untuk persistent queue)', () {
       final map = item.toMap();
-      expect(map['payload'], {'resi': 'SPX123', 'marketplace': 'Shopee'});
+      // payload disimpan sebagai JSON string agar aman di SQLite
+      expect(map['payload'], isA<String>());
+      expect(jsonDecode(map['payload'] as String),
+          {'resi': 'SPX123', 'marketplace': 'Shopee'});
     });
 
     test('fromMap payload is preserved', () {

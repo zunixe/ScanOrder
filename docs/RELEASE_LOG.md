@@ -29,6 +29,7 @@ curl -s -X POST \
 | 2025-08-xx | 1.0.3 | 210 | production | rilis reguler |
 | 2025-08-25 | 1.0.4 | 220 | production | rilis reguler |
 | **2026-09-01** | **1.0.5** | **230** | production | Security & stabilitas: tier subscription server-authoritative (trigger RLS), IAP receipt verification, dedupe scan antar-device, duplikat check cloud utk user personal, Free tier tanpa upload foto, IAP cancel→downgrade, fix BuildContext crash, fix notifikasi nyangkut setelah logout/register, fix sync task stale. Fitur: approval pendaftar di Admin Panel + notifikasi admin/user, notifikasi "anggota tim baru" realtime, kamera & UI fix. |
+| **2026-09-22** | **1.0.6** | **231** | production | **Fix Google Sign-In** (native Android tanpa browser): SHA-1 Play App Signing didaftarkan (OAuth client `ScanOrder Play Signing`), Supabase project di-restore dari pause, hapus `signOut()` sebelum `signIn()` (ApiException 4), listener auth didaftarkan/dilepas dengan benar (fix crash setelah dialog login ditutup). Plus: card statistik theme-aware (dark mode), `AppLocalizations.maybeOf()` supaya widget tidak crash tanpa delegate. |
 
 ### Checklist rilis
 

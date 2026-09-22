@@ -25,22 +25,18 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
   bool _isSignup = false;
   bool _hasClosed = false;
   StorageTier _selectedTier = StorageTier.basic;
+  AuthProvider? _auth;
 
   @override
   void initState() {
     super.initState();
     // Auto-close dialog saat Google OAuth berhasil (authStateChanges trigger)
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final auth = context.read<AuthProvider>();
+      _auth = auth;
       auth.addListener(_onAuthChange);
     });
-  }
-
-  void _onAuthChange() {
-    final auth = context.read<AuthProvider>();
-    if (auth.isLoggedIn) {
-      _closeAfterLogin();
-    }
   }
 
   void _closeAfterLogin() {
@@ -59,10 +55,23 @@ class _LoginDialogContentState extends State<_LoginDialogContent> {
 
   @override
   void dispose() {
-    try { context.read<AuthProvider>().removeListener(_onAuthChange); } catch (_) {}
+    // Lepas listener tanpa menyentuh context (context bisa sudah tidak valid
+    // saat dispose) — mencegah crash notifyListeners setelah dialog ditutup.
+    _auth?.removeListener(_onAuthChange);
+    _auth = null;
     _emailCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
+  }
+
+  void _onAuthChange() {
+    // Listener bisa dipanggil setelah dispose — jangan sentuh context.
+    if (!mounted) return;
+    final auth = _auth;
+    if (auth == null) return;
+    if (auth.isLoggedIn) {
+      _closeAfterLogin();
+    }
   }
 
   @override

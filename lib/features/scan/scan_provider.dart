@@ -32,8 +32,17 @@ class ScanResult {
 }
 
 class ScanProvider extends ChangeNotifier {
-  final DatabaseHelper _db = DatabaseHelper.instance;
-  final QuotaService _quota = QuotaService();
+  ScanProvider({
+    DatabaseHelper? database,
+    QuotaService? quota,
+    SupabaseService? supabase,
+  })  : _db = database ?? DatabaseHelper.instance,
+        _quota = quota ?? QuotaService(),
+        _supabase = supabase ?? SupabaseService();
+
+  final DatabaseHelper _db;
+  final QuotaService _quota;
+  final SupabaseService _supabase;
 
   ScanResult? lastResult;
   int todayCount = 0;
@@ -82,7 +91,7 @@ class ScanProvider extends ChangeNotifier {
     countsState = const AsyncState.loading();
     notifyListeners();
     try {
-      final userId = SupabaseService().currentUser?.id;
+      final userId = _supabase.currentUser?.id;
       // Migrate old non-user-scoped keys to user-scoped keys, then sync from cloud
       if (userId != null) {
         await _quota.migrateToUserScopedKeys();
@@ -91,8 +100,8 @@ class ScanProvider extends ChangeNotifier {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       if (_teamId != null) {
         // Team mode: query Supabase for real-time cross-device counts
-        todayCount = await SupabaseService().getTeamTodayScans(_teamId!);
-        totalCount = await SupabaseService().getTeamTotalScans(_teamId!);
+        todayCount = await _supabase.getTeamTodayScans(_teamId!);
+        totalCount = await _supabase.getTeamTotalScans(_teamId!);
         // Team members have unlimited quota
         scanLimit = -1;
         remainingScans = -1;
@@ -126,14 +135,14 @@ class ScanProvider extends ChangeNotifier {
     categoriesState = const AsyncState.loading();
     notifyListeners();
     try {
-      final userId = SupabaseService().currentUser?.id;
+      final userId = _supabase.currentUser?.id;
       // Team mode: sync categories from Supabase first, then load from local
       if (_teamId != null) {
         await _syncTeamCategoriesFromSupabase();
         categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
         // Use local DB counts (always accurate) + Supabase counts (cross-device) — take the max
         final localCounts = await _db.getCategoryCounts(userId: userId);
-        final supStats = await SupabaseService().getTeamCategoryStats(_teamId!);
+        final supStats = await _supabase.getTeamCategoryStats(_teamId!);
         categoryCounts = {};
         for (final cat in categories) {
           final local = localCounts[cat.id] ?? 0;
@@ -156,10 +165,10 @@ class ScanProvider extends ChangeNotifier {
 
   /// Sync team categories from Supabase to local DB so they persist
   Future<void> _syncTeamCategoriesFromSupabase() async {
-    final userId = SupabaseService().currentUser?.id;
+    final userId = _supabase.currentUser?.id;
     // Only pass adminUserId for team members (not admin themselves)
     final effectiveAdminId = (_adminUserId != null && _adminUserId != userId) ? _adminUserId : null;
-    await SupabaseService().syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
+    await _supabase.syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
     AppLogger.info('ScanProvider', '_syncTeamCategoriesFromSupabase: synced own + admin cats');
   }
 
@@ -169,14 +178,14 @@ class ScanProvider extends ChangeNotifier {
   }
 
   Future<void> addCategory(String name, String color) async {
-    final userId = SupabaseService().currentUser?.id;
+    final userId = _supabase.currentUser?.id;
     final category = ScanCategory(name: name, color: color, userId: userId);
     final localId = await _db.insertCategory(category);
     categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
     activeCategoryId = localId;
     // Sync to Supabase: query existing category by name+user_id first to get UUID
     Future.microtask(() async {
-      final sup = SupabaseService();
+      final sup = _supabase;
       final client = sup.client;
       if (client != null && userId != null) {
         try {
@@ -214,22 +223,22 @@ class ScanProvider extends ChangeNotifier {
   Future<void> deleteCategory(int id) async {
     await _db.deleteCategory(id);
     if (activeCategoryId == id) activeCategoryId = null;
-    final userId = SupabaseService().currentUser?.id;
+    final userId = _supabase.currentUser?.id;
     categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
     // Sync delete to Supabase
-    Future.microtask(() => SupabaseService().deleteCategory(id));
+    Future.microtask(() => _supabase.deleteCategory(id));
     notifyListeners();
   }
 
   Future<void> renameCategory(int id, String newName) async {
-    final userId = SupabaseService().currentUser?.id;
+    final userId = _supabase.currentUser?.id;
     final cat = categories.where((c) => c.id == id).firstOrNull;
     if (cat == null) return;
     final updated = cat.copyWith(name: newName);
     await _db.updateCategory(updated);
     categories = await _db.getAllCategories(userId: userId, adminUserId: _adminUserId);
     // Sync to Supabase
-    Future.microtask(() => SupabaseService().upsertCategory(id, newName, cat.color));
+    Future.microtask(() => _supabase.upsertCategory(id, newName, cat.color));
     notifyListeners();
   }
 
@@ -287,7 +296,7 @@ class ScanProvider extends ChangeNotifier {
       }
 
       // Check duplicate: scoped per category if active, else per user
-      final userId = SupabaseService().currentUser?.id;
+      final userId = _supabase.currentUser?.id;
       // In team mode, scans belong to admin — use admin's user_id for ownership
       // Free users (not logged in) use null — local-only storage
       final scanOwnerId = _teamId != null && _adminUserId != null ? _adminUserId! : userId;
@@ -424,8 +433,8 @@ class ScanProvider extends ChangeNotifier {
 
       // Non-critical background: sync counts & quota
       if (_teamId != null) {
-        todayCount = await SupabaseService().getTeamTodayScans(_teamId!);
-        totalCount = await SupabaseService().getTeamTotalScans(_teamId!);
+        todayCount = await _supabase.getTeamTodayScans(_teamId!);
+        totalCount = await _supabase.getTeamTotalScans(_teamId!);
       } else {
         remainingScans = await _quota.getRemainingFreeScans();
         // Notify when quota is low
@@ -437,7 +446,7 @@ class ScanProvider extends ChangeNotifier {
 
       // Sync ke Supabase via queue (background)
       final queue = SyncQueue();
-      final user = SupabaseService().currentUser;
+      final user = _supabase.currentUser;
       if (user != null) {
         final tier = await _quota.getTier();
         // Enqueue photo upload if needed (Free tier: no cloud storage)
@@ -502,7 +511,7 @@ class ScanProvider extends ChangeNotifier {
   /// If categoryId is provided, only check within that category.
   Future<bool?> _checkCloudDuplicate(String resi, int? categoryId, {required bool isTeam, String? userId}) async {
     try {
-      final client = SupabaseService().client;
+      final client = _supabase.client;
       if (client == null) return null;
       if (isTeam && _teamId == null) return null;
 

@@ -40,6 +40,10 @@ class PackageInfo {
 }
 
 class QuotaService {
+  QuotaService({DatabaseHelper? database, SupabaseService? supabase})
+      : _db = database ?? DatabaseHelper.instance,
+        _supabase = supabase ?? SupabaseService();
+
   // Scan limits per tier (per bulan)
   static const int _freeScans = 200;
   static const int _basicScans = 3000;
@@ -68,8 +72,8 @@ class QuotaService {
   List<PackageInfo> get packages => _packages.isEmpty ? _fallbackPackages : _packages;
 
 
-  final DatabaseHelper _db = DatabaseHelper.instance;
-  final SupabaseService _supabase = SupabaseService();
+  final DatabaseHelper _db;
+  final SupabaseService _supabase;
   static const String _tierKey = 'storage_tier';
   static const String _cycleStartKey = 'subscription_cycle_start_ms';
   static const String _cycleEndKey = 'subscription_cycle_end_ms';

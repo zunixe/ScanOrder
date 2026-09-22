@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:equatable/equatable.dart';
 
 enum SyncOperationType {
@@ -100,7 +102,7 @@ class SyncQueueItem extends Equatable {
       'table_name': tableName,
       'record_id': recordId,
       'operation_type': operationType.index,
-      'payload': payload,
+      'payload': jsonEncode(payload),
       'status': status.index,
       'retry_count': retryCount,
       'created_at': createdAt.toIso8601String(),
@@ -118,7 +120,7 @@ class SyncQueueItem extends Equatable {
       tableName: map['table_name'] as String,
       recordId: map['record_id'] as String,
       operationType: SyncOperationType.values[map['operation_type'] as int],
-      payload: Map<String, dynamic>.from(map['payload'] as Map),
+      payload: _decodePayload(map['payload']),
       status: SyncStatus.values[map['status'] as int],
       retryCount: map['retry_count'] as int? ?? 0,
       createdAt: DateTime.parse(map['created_at'] as String),
@@ -132,5 +134,19 @@ class SyncQueueItem extends Equatable {
       serverVersion: map['server_version'] as int?,
       localVersion: map['local_version'] as int?,
     );
+  }
+
+  /// Payload disimpan sebagai JSON string di kolom TEXT. Menerima juga
+  /// bentuk Map (untuk kompatibilitas data lama / in-memory).
+  static Map<String, dynamic> _decodePayload(Object? raw) {
+    if (raw == null) return {};
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is String) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    return {};
   }
 }

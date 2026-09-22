@@ -105,4 +105,109 @@ void main() {
       expect(AppStringsEn(), isA<AppStrings>());
     });
   });
+
+  group('All localizations getters are non-empty', () {
+    final getters = <String, String Function(AppLocalizations)>{
+      'about': (l) => l.about,
+      'allDates': (l) => l.allDates,
+      'appName': (l) => l.appName,
+      'cancel': (l) => l.cancel,
+      'category': (l) => l.category,
+      'chooseFromGallery': (l) => l.chooseFromGallery,
+      'confirm': (l) => l.confirm,
+      'contactSupport': (l) => l.contactSupport,
+      'dataSavedLocally': (l) => l.dataSavedLocally,
+      'date': (l) => l.date,
+      'delete': (l) => l.delete,
+      'deleteAccount': (l) => l.deleteAccount,
+      'deleteAccountConfirm': (l) => l.deleteAccountConfirm,
+      'deleteConfirm': (l) => l.deleteConfirm,
+      'editPhoto': (l) => l.editPhoto,
+      'error': (l) => l.error,
+      'exportCsv': (l) => l.exportCsv,
+      'exportCsvSubtitle': (l) => l.exportCsvSubtitle,
+      'exportXlsx': (l) => l.exportXlsx,
+      'exportXlsxSubtitle': (l) => l.exportXlsxSubtitle,
+      'freeTier': (l) => l.freeTier,
+      'loading': (l) => l.loading,
+      'login': (l) => l.login,
+      'loginForBackup': (l) => l.loginForBackup,
+      'logout': (l) => l.logout,
+      'marketplace': (l) => l.marketplace,
+      'noDataToExport': (l) => l.noDataToExport,
+      'noScansFound': (l) => l.noScansFound,
+      'proTier': (l) => l.proTier,
+      'removePhoto': (l) => l.removePhoto,
+      'retry': (l) => l.retry,
+      'scanHistory': (l) => l.scanHistory,
+      'scanResi': (l) => l.scanResi,
+      'scans': (l) => l.scans,
+      'searchResi': (l) => l.searchResi,
+      'settings': (l) => l.settings,
+      'startScanning': (l) => l.startScanning,
+      'stats': (l) => l.stats,
+      'subscription': (l) => l.subscription,
+      'takePhoto': (l) => l.takePhoto,
+      'teamTier': (l) => l.teamTier,
+      'thisWeekScans': (l) => l.thisWeekScans,
+      'time': (l) => l.time,
+      'todayScans': (l) => l.todayScans,
+      'totalScans': (l) => l.totalScans,
+      'unlimitedTier': (l) => l.unlimitedTier,
+      'upgradeForExcel': (l) => l.upgradeForExcel,
+      'version': (l) => l.version,
+    };
+
+    test('all getters non-empty for Indonesian', () {
+      final l10n = AppLocalizations(const Locale('id'));
+      getters.forEach((name, get) {
+        expect(get(l10n), isNotEmpty, reason: '$name (id) should be non-empty');
+      });
+    });
+
+    test('all getters non-empty for English', () {
+      final l10n = AppLocalizations(const Locale('en'));
+      getters.forEach((name, get) {
+        expect(get(l10n), isNotEmpty, reason: '$name (en) should be non-empty');
+      });
+    });
+
+    test('id and en differ for scanHistory', () {
+      expect(
+        AppLocalizations(const Locale('id')).scanHistory,
+        isNot(AppLocalizations(const Locale('en')).scanHistory),
+      );
+    });
+  });
+
+  group('AppLocalizationsDelegate', () {
+    test('supports id and en', () {
+      final delegate = AppLocalizationsDelegate(const Locale('id'));
+      expect(delegate.isSupported(const Locale('id')), isTrue);
+      expect(delegate.isSupported(const Locale('en')), isTrue);
+    });
+
+    test('does not support unsupported locales', () {
+      final delegate = AppLocalizationsDelegate(const Locale('id'));
+      expect(delegate.isSupported(const Locale('fr')), isFalse);
+      expect(delegate.isSupported(const Locale('de')), isFalse);
+    });
+
+    test('load returns AppLocalizations for locale', () async {
+      final delegate = AppLocalizationsDelegate(const Locale('en'));
+      final loaded = await delegate.load(const Locale('en'));
+      expect(loaded, isA<AppLocalizations>());
+      expect(loaded.locale.languageCode, 'en');
+    });
+
+    test('shouldReload always false', () {
+      final delegate = AppLocalizationsDelegate(const Locale('id'));
+      expect(delegate.shouldReload(delegate), isFalse);
+    });
+
+    test('kSupportedLocales contains id and en', () {
+      final codes = kSupportedLocales.map((l) => l.languageCode).toSet();
+      expect(codes, {'id', 'en'});
+    });
+  });
 }

@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/scan_record.dart';
@@ -34,6 +34,25 @@ class SupabaseService {
   bool get _isConfigured =>
       _supabaseUrl.isNotEmpty && _supabaseKey.isNotEmpty;
 
+  /// Test-only override for the Supabase client and current user.
+  ///
+  /// Ketika di-set (mis. oleh unit test / fake), getter [client] dan
+  /// [currentUser] akan memakai nilai ini alih-alih instance Supabase nyata.
+  /// Tidak berpengaruh pada produksi karena default-nya null.
+  @visibleForTesting
+  SupabaseClient? overrideClient;
+
+  /// Test-only override untuk `currentUser`. Lihat [overrideClient].
+  @visibleForTesting
+  Object? overrideCurrentUser;
+
+  /// Reset semua test override (dipanggil di tearDown test).
+  @visibleForTesting
+  void resetTestOverrides() {
+    overrideClient = null;
+    overrideCurrentUser = null;
+  }
+
   Future<void> initialize() async {
     if (!_isConfigured) {
       AppLogger.info('Supabase', 'URL/key masih placeholder — skip');
@@ -54,6 +73,7 @@ class SupabaseService {
   }
 
   SupabaseClient? get _client {
+    if (overrideClient != null) return overrideClient;
     if (_isOffline || !_isConfigured) return null;
     try {
       return Supabase.instance.client;
@@ -163,20 +183,26 @@ class SupabaseService {
   static const String _googleWebClientId =
       String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
 
+  /// Error terakhir dari percobaan native sign-in (untuk ditampilkan di UI).
+  static String? lastGoogleError;
+
   Future<bool> signInWithGoogle() async {
     final client = _client;
     if (client == null) return false;
+    lastGoogleError = null;
 
     // ── Native flow (Android) ──
     if (!kIsWeb && Platform.isAndroid && _googleWebClientId.isNotEmpty) {
       try {
         // ignore: avoid_print
         print('[GOOGLE] native flow start, serverClientId=$_googleWebClientId');
-        final google = GoogleSignIn(serverClientId: _googleWebClientId);
-        // Bersihkan akun cached agar picker selalu muncul (pola ChatYuk)
-        try {
-          await google.signOut();
-        } catch (_) {}
+        final google = GoogleSignIn(
+          serverClientId: _googleWebClientId,
+          scopes: const ['email', 'profile'],
+        );
+        // account picker muncul kalau belum ada akun ter-cache.
+        // Tidak perlu signOut() dulu — signOut() justru memicu ApiException 4
+        // (SIGN_IN_REQUIRED) pada sebagian device karena state GMS belum siap.
         final account = await google.signIn();
         if (account == null) {
           // User menutup dialog pilih akun — JANGAN fallback ke browser
@@ -187,18 +213,30 @@ class SupabaseService {
         }
         final auth = await account.authentication;
         final idToken = auth.idToken;
+        final accessToken = auth.accessToken;
         // ignore: avoid_print
-        print('[GOOGLE] native ok, email=${account.email}, idTokenLen=${idToken?.length ?? 0}');
+        print('[GOOGLE] native account=${account.email} idTokenLen=${idToken?.length ?? 0} accessTokenLen=${accessToken?.length ?? 0}');
         if (idToken == null) {
+          lastGoogleError = 'ID token Google tidak diterima '
+              '(accessToken=${accessToken?.length ?? 0}). '
+              'Pastikan SHA-1 rilis terdaftar di Google Cloud.';
           // ignore: avoid_print
-          print('[GOOGLE] idToken KOSONG — fallback OAuth web');
+          print('[GOOGLE] idToken KOSONG (accessToken ada=${accessToken != null})');
           AppLogger.info('Supabase', 'Google idToken kosong — fallback OAuth web');
         } else {
-          await client.auth.signInWithIdToken(
-            provider: OAuthProvider.google,
-            idToken: idToken,
-            accessToken: auth.accessToken,
-          );
+          try {
+            await client.auth.signInWithIdToken(
+              provider: OAuthProvider.google,
+              idToken: idToken,
+              accessToken: accessToken,
+            );
+          } catch (e) {
+            // ID token didapat tapi Supabase menolak (audience/nonce).
+            lastGoogleError = 'Supabase menolak ID token: $e';
+            // ignore: avoid_print
+            print('[GOOGLE] signInWithIdToken DITOLAK: $e');
+            rethrow;
+          }
           // ignore: avoid_print
           print('[GOOGLE] signInWithIdToken OK (native, tanpa browser)');
           AppLogger.info('Supabase', 'Google native sign-in OK (tanpa browser)');
@@ -208,6 +246,7 @@ class SupabaseService {
         // Biasanya ApiException 10 = Android OAuth client (SHA-1/package)
         // belum terdaftar / propagasi belum selesai → fallback agar login
         // tetap jalan. Log penuh ke logcat (print tampil di release juga).
+        lastGoogleError ??= '$e';
         // ignore: avoid_print
         print('[GOOGLE] native sign-in GAGAL: $e');
         // ignore: avoid_print
@@ -271,6 +310,7 @@ class SupabaseService {
 
   /// Cek user yang sedang login
   User? get currentUser {
+    if (overrideCurrentUser != null) return overrideCurrentUser as User?;
     final client = _client;
     if (client == null) return null;
     try {

@@ -66,7 +66,7 @@ class _DefaultErrorWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
+    final l10n = AppLocalizations.maybeOf(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -84,7 +84,7 @@ class _DefaultErrorWidget extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton.tonal(
                 onPressed: onRetry,
-                child: Text(l10n.retry),
+                child: Text(l10n?.retry ?? 'Coba lagi'),
               ),
             ],
           ],

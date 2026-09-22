@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../core/logging/logger.dart';
 import 'dart:io';
 import 'package:sqflite_sqlcipher/sqflite.dart';
@@ -79,11 +80,17 @@ class SyncQueue {
   factory SyncQueue() => _instance;
   SyncQueue._internal();
 
-  final SupabaseService _supabase = SupabaseService();
+  SupabaseService _supabase = SupabaseService();
   bool _isProcessing = false;
   bool _isOnline = true;
   int _tasksProcessedInWindow = 0;
   DateTime? _windowStart;
+
+  /// Test-only: ganti instance SupabaseService (mis. dengan mock).
+  @visibleForTesting
+  void setSupabaseService(SupabaseService supabase) {
+    _supabase = supabase;
+  }
 
   /// Tim aktif saat ini — di-set AuthProvider via setTeamContext.
   /// Dipakai untuk mendrop task milik tim yang sudah ditinggal.
@@ -634,6 +641,18 @@ class SyncQueue {
   }
 
   Database? _cachedQueueDb;
+
+  /// Test-only: pasang database queue in-memory agar tidak menyentuh disk.
+  @visibleForTesting
+  void setTestDatabase(Database db) {
+    _cachedQueueDb = db;
+  }
+
+  /// Test-only: atur status online/offline untuk menghindari pemrosesan nyata.
+  @visibleForTesting
+  void setTestOnline(bool online) {
+    _isOnline = online;
+  }
 
   /// Get/create the queue database (encrypted)
   Future<Database> _getQueueDb() async {

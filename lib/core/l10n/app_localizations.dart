@@ -162,8 +162,23 @@ class AppLocalizations {
 
   AppLocalizations(this.locale);
 
+  /// Ambil localization dari context.
+  /// Return null jika belum tersedia (mis. widget di-test tanpa delegate
+  /// atau dipakai di luar MaterialApp) — jangan crash.
+  static AppLocalizations? maybeOf(BuildContext context) {
+    return Localizations.of<AppLocalizations>(context, AppLocalizations);
+  }
+
   static AppLocalizations of(BuildContext context) {
-    return Localizations.of<AppLocalizations>(context, AppLocalizations)!;
+    final l = maybeOf(context);
+    if (l == null) {
+      throw FlutterError(
+        'AppLocalizations.of() dipanggil tanpa AppLocalizations delegate. '
+        'Pastikan MaterialApp menyertakan AppLocalizations.delegate '
+        '(atau gunakan AppLocalizations.maybeOf).',
+      );
+    }
+    return l;
   }
 
   late final AppStrings _strings = locale.languageCode == 'en' 

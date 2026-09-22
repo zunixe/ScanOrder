@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthState;
 import 'package:scanorder/core/supabase/supabase_service.dart';
 import 'package:scanorder/models/scan_record.dart';
 
@@ -99,6 +100,92 @@ void main() {
       // All methods should work without throwing in offline mode
       expect(svc.fetchOrders(), completion(isEmpty));
       expect(svc.fetchCategories(), completion(isEmpty));
+    });
+  });
+
+  group('SupabaseService guard-first methods (client == null)', () {
+    late SupabaseService svc;
+
+    setUp(() async {
+      svc = SupabaseService();
+      svc.resetTestOverrides();
+      await svc.initialize(); // unconfigured → offline
+    });
+
+    tearDown(() => svc.resetTestOverrides());
+
+    test('currentUser null when override cleared', () {
+      expect(svc.currentUser, isNull);
+    });
+
+    test('authStateChanges is empty stream when offline', () {
+      expect(svc.authStateChanges, isA<Stream<AuthState>>());
+    });
+
+    test('team reads return null/empty offline', () async {
+      expect(await svc.getMyTeam(), isNull);
+      expect(await svc.getTeamByInviteCode('ABC'), isNull);
+      expect(await svc.createTeam('Tim Saya'), isNull);
+      expect(await svc.getTeamTodayScans('t1'), 0);
+      expect(await svc.getTeamTotalScans('t1'), 0);
+      expect(await svc.getTeamDistinctDates('t1'), isEmpty);
+      expect(await svc.fetchTeamScans('t1'), isEmpty);
+      expect(await svc.getTeamScansByDate('t1', '2026-01-01'), isEmpty);
+      expect(await svc.searchTeamScans('t1', 'SPX'), isEmpty);
+    });
+
+    test('category ops are safe offline', () async {
+      expect(await svc.fetchCategories(), isEmpty);
+      await expectLater(svc.deleteCategory(1), completes);
+      await expectLater(svc.upsertCategory(1, 'A', '#000'), completes);
+      await expectLater(svc.syncTeamCategoriesToLocal(), completes);
+    });
+
+    test('scan writes are safe offline', () async {
+      await expectLater(svc.deleteScanByResi('SPX1'), completes);
+      await expectLater(
+        svc.insertScanWithTeam(
+          ScanRecord(
+            resi: 'SPX1',
+            marketplace: 'Shopee',
+            scannedAt: DateTime.now(),
+            date: '2026-01-01',
+          ),
+          teamId: 't1',
+        ),
+        completes,
+      );
+    });
+
+    test('photo upload/download return null offline', () async {
+      expect(await svc.downloadPhoto('path', '/tmp/x.jpg'), isNull);
+      expect(await svc.uploadPhoto(File('/nonexistent.jpg'), 'f.jpg'), isNull);
+    });
+
+    test('auth actions are safe offline', () async {
+      expect(await svc.signInWithGoogle(), isFalse);
+      await expectLater(svc.signOut(), completes);
+      // Offline → assume session valid (avoids disruptive logout).
+      expect(await svc.isSessionValid(), isTrue);
+      await expectLater(svc.clearSession(), completes);
+    });
+
+    test('subscription helpers safe offline', () async {
+      expect(await svc.fetchMySubscription(), isNull);
+      await expectLater(
+        svc.upsertMySubscription({'tier': 'pro'}),
+        completes,
+      );
+      await expectLater(svc.claimSubscriptionByEmail(), completes);
+    });
+
+    test('login history safe offline', () async {
+      expect(await svc.fetchLoginHistory('u1'), isEmpty);
+      await expectLater(svc.insertLoginHistory(deviceId: 'd1'), completes);
+    });
+
+    test('approval helpers safe offline', () async {
+      expect(await svc.getMyApprovalStatus(), isNull);
     });
   });
 }

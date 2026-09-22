@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:scanorder/core/notifications/notification_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   // NotificationService uses FlutterLocalNotificationsPlugin which requires platform channels
   // Test the logic patterns instead of constructing the service
 
@@ -47,6 +50,62 @@ void main() {
       final tierName = 'Pro';
       final msg = 'Paket Anda sekarang: $tierName';
       expect(msg, contains('Pro'));
+    });
+  });
+
+  group('NotificationService (uninitialized guards)', () {
+    late NotificationService service;
+
+    setUp(() {
+      service = NotificationService();
+    });
+
+    test('singleton returns same instance', () {
+      expect(identical(NotificationService(), service), isTrue);
+    });
+
+    test('showQuotaWarning is a no-op before init', () async {
+      await expectLater(
+        service.showQuotaWarning(remaining: 5, limit: 200),
+        completes,
+      );
+    });
+
+    test('showQuotaWarning without numbers is a no-op', () async {
+      await expectLater(service.showQuotaWarning(), completes);
+    });
+
+    test('showSyncError is a no-op before init', () async {
+      await expectLater(service.showSyncError(error: 'timeout'), completes);
+    });
+
+    test('showSyncError without error is a no-op', () async {
+      await expectLater(service.showSyncError(), completes);
+    });
+
+    test('showSubscriptionUpdate is a no-op before init', () async {
+      await expectLater(
+        service.showSubscriptionUpdate(tierName: 'Team'),
+        completes,
+      );
+    });
+
+    test('showNewSignup is a no-op before init', () async {
+      await expectLater(
+        service.showNewSignup(email: 'a@b.com'),
+        completes,
+      );
+    });
+
+    test('showApproved is a no-op before init', () async {
+      await expectLater(service.showApproved(), completes);
+    });
+
+    test('showAppNotification is a no-op before init', () async {
+      await expectLater(
+        service.showAppNotification(title: 'Halo', body: 'Pesan'),
+        completes,
+      );
     });
   });
 }

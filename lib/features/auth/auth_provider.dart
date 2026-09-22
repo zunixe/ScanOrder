@@ -527,7 +527,12 @@ class AuthProvider extends ChangeNotifier {
     try {
       final ok = await _supabase.signInWithGoogle();
       if (!ok) {
-        _error = 'Google login gagal. Pastikan Google provider diaktifkan di Supabase dan Client ID benar.';
+        // Tampilkan penyebab asli (mis. ApiException 10 / audience mismatch)
+        // supaya tidak buta saat native flow gagal lalu fallback ke browser.
+        final detail = SupabaseService.lastGoogleError;
+        _error = detail != null
+            ? 'Google login gagal: $detail'
+            : 'Google login gagal. Pastikan Google provider diaktifkan di Supabase dan Client ID benar.';
       } else {
         AnalyticsService.login('google');
       }

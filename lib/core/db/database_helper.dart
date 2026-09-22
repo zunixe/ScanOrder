@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'package:sqflite_common/sqflite.dart' as common;
 import 'package:path/path.dart';
@@ -15,8 +16,24 @@ class DatabaseHelper {
   static bool _testMode = false;
   static const _migratedKey = 'db_encrypted_migrated';
 
+  /// Test-only: override the database file path (e.g. a unique in-memory/open
+  /// path per test file) so parallel test files don't share a single DB.
+  @visibleForTesting
+  static String? testDatabasePath;
+
   /// Enable test mode — skips encryption (for unit tests only)
   static void setTestMode(bool enabled) => _testMode = enabled;
+
+  /// Test-only: close & drop the cached DB connection and clear the path
+  /// override. Call in `tearDownAll` to avoid leaking connections across files.
+  @visibleForTesting
+  static Future<void> resetForTests() async {
+    try {
+      await _database?.close();
+    } catch (_) {}
+    _database = null;
+    testDatabasePath = null;
+  }
 
   DatabaseHelper._internal();
 
@@ -56,7 +73,7 @@ class DatabaseHelper {
   Future<Database> _initDatabase() async {
     if (_testMode) {
       final dbPath = await common.getDatabasesPath();
-      final path = join(dbPath, 'scanorder.db');
+      final path = testDatabasePath ?? join(dbPath, 'scanorder.db');
       return await common.openDatabase(
         path,
         version: MigrationRegistry.currentVersion,

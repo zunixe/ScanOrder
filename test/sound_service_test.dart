@@ -1,19 +1,18 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:scanorder/services/sound_service.dart';
 
 void main() {
-  // SoundService uses AudioPlayer which requires platform channels
-  // Test the logic patterns instead of constructing the service
+  TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('SoundService logic', () {
-    test('singleton pattern works', () {
-      final a = Object();
-      final b = a;
-      expect(identical(a, b), true);
+  group('SoundService', () {
+    test('playScanSuccess does not throw without platform support', () async {
+      // audioplayers throws MissingPluginException in tests; the service
+      // swallows it, so the call must complete normally.
+      await expectLater(SoundService().playScanSuccess(), completes);
     });
 
-    test('asset source paths are correct', () {
-      expect('sounds/scan_success.mp3', contains('scan_success'));
-      expect('sounds/scan_duplicate.mp3', contains('scan_duplicate'));
+    test('playScanDuplicate does not throw without platform support', () async {
+      await expectLater(SoundService().playScanDuplicate(), completes);
     });
   });
 }

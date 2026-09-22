@@ -9,7 +9,14 @@ import '../../models/category.dart';
 import '../../services/sync_queue.dart';
 
 class HistoryProvider extends ChangeNotifier {
-  final DatabaseHelper _db = DatabaseHelper.instance;
+  HistoryProvider({
+    DatabaseHelper? database,
+    SupabaseService? supabase,
+  })  : _db = database ?? DatabaseHelper.instance,
+        _supabase = supabase ?? SupabaseService();
+
+  final DatabaseHelper _db;
+  final SupabaseService _supabase;
 
   List<ScanRecord> scans = [];
   String selectedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -59,7 +66,7 @@ class HistoryProvider extends ChangeNotifier {
     try {
       if (_teamId != null) {
         AppLogger.info('History', 'loadDates TEAM mode: teamId=$_teamId');
-        availableDates = await SupabaseService().getTeamDistinctDates(_teamId!);
+        availableDates = await _supabase.getTeamDistinctDates(_teamId!);
         AppLogger.info('History', 'loadDates TEAM result: ${availableDates.length} dates = $availableDates');
       } else {
         AppLogger.info('History', 'loadDates PERSONAL mode: userId=$_userId');
@@ -89,11 +96,11 @@ class HistoryProvider extends ChangeNotifier {
         AppLogger.info('History', 'loadScans TEAM mode: teamId=$_teamId, date=$selectedDate, searching=$isSearching');
         List<Map<String, dynamic>> raw;
         if (isSearching && searchQuery.isNotEmpty) {
-          raw = await SupabaseService().searchTeamScans(_teamId!, searchQuery);
+          raw = await _supabase.searchTeamScans(_teamId!, searchQuery);
         } else if (selectedDate == allDatesSentinel) {
-          raw = await SupabaseService().fetchTeamScans(_teamId!);
+          raw = await _supabase.fetchTeamScans(_teamId!);
         } else {
-          raw = await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
+          raw = await _supabase.getTeamScansByDate(_teamId!, selectedDate);
         }
         AppLogger.info('History', 'loadScans TEAM raw: ${raw.length} rows');
         if (raw.isNotEmpty) AppLogger.info('History', 'loadScans TEAM sample: ${raw.first}');
@@ -150,7 +157,7 @@ class HistoryProvider extends ChangeNotifier {
     await _db.deleteScan(id);
     // Sync delete ke Supabase
     if (order.resi.isNotEmpty) {
-      SupabaseService().deleteScanByResi(order.resi);
+      _supabase.deleteScanByResi(order.resi);
     }
     await loadScans();
     await loadDates();
@@ -179,7 +186,7 @@ class HistoryProvider extends ChangeNotifier {
         categories = await _db.getAllCategories(userId: _userId, adminUserId: _adminUserId);
         // Use local DB counts (always accurate) + Supabase counts (cross-device) — take the max
         final localCounts = await _db.getCategoryCounts(userId: _userId);
-        final supStats = await SupabaseService().getTeamCategoryStats(_teamId!);
+        final supStats = await _supabase.getTeamCategoryStats(_teamId!);
         categoryCounts = {};
         for (final cat in categories) {
           final local = localCounts[cat.id] ?? 0;
@@ -201,7 +208,7 @@ class HistoryProvider extends ChangeNotifier {
   }
 
   Future<void> _syncTeamCategories() async {
-    final sup = SupabaseService();
+    final sup = _supabase;
     final userId = sup.currentUser?.id;
     final effectiveAdminId = (_adminUserId != null && userId != null && _adminUserId != userId) ? _adminUserId : null;
     await sup.syncTeamCategoriesToLocal(adminUserId: effectiveAdminId);
@@ -213,8 +220,8 @@ class HistoryProvider extends ChangeNotifier {
       // Team mode with category: load all team scans from Supabase,
       // then filter by matching resi with local scan_categories
       final allRaw = selectedDate == allDatesSentinel
-          ? await SupabaseService().fetchTeamScans(_teamId!)
-          : await SupabaseService().getTeamScansByDate(_teamId!, selectedDate);
+          ? await _supabase.fetchTeamScans(_teamId!)
+          : await _supabase.getTeamScansByDate(_teamId!, selectedDate);
       final allOrders = allRaw.map((m) => ScanRecord.fromSupabase(m)).toList();
 
       // Get local resis that belong to this category
@@ -270,7 +277,7 @@ class HistoryProvider extends ChangeNotifier {
       try {
         final order = idx >= 0 ? scans[idx] : await _db.getScanById(id);
         if (order != null) {
-          final client = SupabaseService().client;
+          final client = _supabase.client;
           if (client != null) {
             await client.from('scans').update({'photo_url': null}).eq('resi', order.resi);
           }
@@ -294,7 +301,7 @@ class HistoryProvider extends ChangeNotifier {
   Future<List<ScanRecord>> getAllForExport() async {
     if (_teamId != null) {
       // Team mode: fetch all from Supabase
-      final raw = await SupabaseService().fetchTeamScans(_teamId!);
+      final raw = await _supabase.fetchTeamScans(_teamId!);
       return raw.map((m) => ScanRecord.fromSupabase(m)).toList();
     }
     final scans = await _db.getAllScans(userId: _userId);
